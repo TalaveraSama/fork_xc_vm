@@ -482,6 +482,16 @@ BINARIES_SOURCES = [
     ("Vateron-Media", "XC_VM_Binaries"),
 ]
 
+# Where XC_VM.zip comes from when the installer was run without one beside it.
+# Same shape and same order as BINARIES_SOURCES: this fork first, upstream only
+# as a safety net. Upstream used to be hardcoded here, which meant an install
+# with no local archive silently fetched the unpatched panel -- none of the
+# fixes in this tree, and the in-panel updater pointed back at upstream.
+PANEL_SOURCES = [
+    ("TalaveraSama", "fork_xc_vm"),
+    ("Vateron-Media", "XC_VM"),
+]
+
 # Set by the database step; the final banner reports failure instead of
 # claiming success when the schema or the panel account never got created.
 DB_SETUP_OK = True
@@ -1093,8 +1103,84 @@ def is_valid_tar(file_path):
         return False
 
 
+def get_latest_panel_tag(owner, repo):
+    """Newest stable panel release tag in a repository.
+
+    The fork publishes mirror releases alongside the panel -- `binaries-<tag>`
+    and `base-<version>` -- as prereleases, so `releases/latest` is not enough
+    on its own. Take the newest stable release that is not one of those.
+    """
+    try:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=100"
+        )
+        req.add_header("User-Agent", "XC_VM-Installer/1.0")
+        with urllib.request.urlopen(req, timeout=15) as response:
+            releases = json.loads(response.read().decode())
+
+        for r in releases:
+            tag = str(r.get("tag_name", ""))
+            if r.get("draft") or r.get("prerelease"):
+                continue
+            if tag.startswith("binaries-") or tag.startswith("base-"):
+                continue
+            return tag
+        return None
+    except Exception as e:
+        printc(f"No panel release from {owner}/{repo}: {e}", col.WARNING)
+        return None
+
+
+def fetch_panel_zip(owner, repo, tag):
+    """Download and verify XC_VM.zip from one source. True only if usable."""
+    url = f"https://github.com/{owner}/{repo}/releases/download/{tag}/XC_VM.zip"
+    printc(f"Downloading: {url}", col.OKBLUE)
+
+    try:
+        urllib.request.urlretrieve(url, "XC_VM.zip")
+    except Exception as e:
+        printc(f"Download error: {e}", col.FAIL)
+        return False
+
+    if not (os.path.exists("XC_VM.zip") and os.path.getsize("XC_VM.zip") > 0):
+        printc("Download failed or file is empty", col.FAIL)
+        return False
+
+    printc(
+        f"Download successful: XC_VM.zip ({os.path.getsize('XC_VM.zip')} bytes)",
+        col.OKGREEN,
+    )
+
+    # Checked against the hashes.md5 of the same release, not a fixed owner:
+    # verifying a fork download against upstream's checksum would always fail.
+    expected_hash = download_release_hash(repo, tag, "XC_VM.zip", owner)
+    if expected_hash:
+        actual_hash = compute_md5("XC_VM.zip")
+        if actual_hash != expected_hash:
+            printc(
+                f"MD5 verification failed for XC_VM.zip: expected {expected_hash}, got {actual_hash}",
+                col.FAIL,
+            )
+            os.remove("XC_VM.zip")
+            return False
+        printc("MD5 verification passed for XC_VM.zip", col.OKGREEN)
+    else:
+        printc(
+            "Warning: Could not retrieve MD5 hash for XC_VM.zip, skipping verification",
+            col.WARNING,
+        )
+
+    if is_valid_zip("XC_VM.zip"):
+        printc("ZIP archive validated successfully", col.OKGREEN)
+        return True
+
+    printc("Downloaded file is not a valid ZIP archive", col.WARNING)
+    os.remove("XC_VM.zip")
+    return False
+
+
 def download_xc_vm():
-    """Download XC_VM from GitHub releases"""
+    """Find XC_VM.zip locally, or download it preferring this fork."""
     printc("Checking for XC_VM installation files...", col.OKBLUE)
 
     # Check if valid files already exist locally
@@ -1108,73 +1194,20 @@ def download_xc_vm():
 
     printc("Not found. Trying to download from GitHub...", col.OKBLUE)
 
-    try:
-        # 1. Get latest version from GitHub API
-        printc("Getting latest version from GitHub API...", col.OKBLUE)
-        api_url = "https://api.github.com/repos/Vateron-Media/XC_VM/releases/latest"
-        req = urllib.request.Request(api_url)
-        req.add_header("User-Agent", "XC_VM-Installer/1.0")
+    for owner, repo in PANEL_SOURCES:
+        tag = get_latest_panel_tag(owner, repo)
+        if not tag:
+            printc(f"No panel release from {owner}/{repo}", col.WARNING)
+            continue
 
-        with urllib.request.urlopen(req, timeout=10) as response:
-            data = json.loads(response.read().decode())
-            latest_version = data["tag_name"]
-            printc(f"Latest version: {latest_version}", col.OKGREEN)
+        printc(f"Panel source: {owner}/{repo} @ {tag}", col.OKGREEN)
+        if fetch_panel_zip(owner, repo, tag):
+            return True
 
-        # 2. Download XC_VM.zip directly from GitHub releases
-        download_url = f"https://github.com/Vateron-Media/XC_VM/releases/download/{latest_version}/XC_VM.zip"
-        printc(f"Downloading: {download_url}", col.OKBLUE)
+        printc(f"{owner}/{repo} @ {tag} gave no usable XC_VM.zip", col.WARNING)
 
-        # Download using urllib
-        urllib.request.urlretrieve(download_url, "XC_VM.zip")
-
-        # Verify download
-        if os.path.exists("XC_VM.zip") and os.path.getsize("XC_VM.zip") > 0:
-            file_size = os.path.getsize("XC_VM.zip")
-            printc(f"Download successful: XC_VM.zip ({file_size} bytes)", col.OKGREEN)
-
-            # MD5 verification
-            expected_hash = download_release_hash("XC_VM", latest_version, "XC_VM.zip")
-            if expected_hash:
-                actual_hash = compute_md5("XC_VM.zip")
-                if actual_hash != expected_hash:
-                    printc(f"MD5 verification failed for XC_VM.zip: expected {expected_hash}, got {actual_hash}", col.FAIL)
-                    os.remove("XC_VM.zip")
-                    return False
-                printc("MD5 verification passed for XC_VM.zip", col.OKGREEN)
-            else:
-                printc("Warning: Could not retrieve MD5 hash for XC_VM.zip, skipping verification", col.WARNING)
-
-            # Validate ZIP file
-            if is_valid_zip("XC_VM.zip"):
-                printc("ZIP archive validated successfully", col.OKGREEN)
-                return True
-            else:
-                printc("Downloaded file is not a valid ZIP archive", col.WARNING)
-                os.remove("XC_VM.zip")
-                return False
-        else:
-            printc("Download failed or file is empty", col.FAIL)
-            return False
-
-    except Exception as e:
-        printc(f"Download error: {e}", col.FAIL)
-
-        # Try alternative methods if download fails
-        printc("Trying alternative download methods...", col.WARNING)
-
-        # Alternative method: Direct download from latest
-        try:
-            alt_url = "https://github.com/Vateron-Media/XC_VM/releases/latest/download/XC_VM.zip"
-            printc(f"Trying alternative: {alt_url}", col.OKBLUE)
-            urllib.request.urlretrieve(alt_url, "XC_VM.zip")
-
-            if os.path.exists("XC_VM.zip") and is_valid_zip("XC_VM.zip"):
-                printc("Alternative download successful", col.OKGREEN)
-                return True
-        except Exception:
-            pass
-
-        return False
+    printc("Could not obtain XC_VM.zip from any source", col.FAIL)
+    return False
 
 
 def install_mariadb_repo(dist_info):
@@ -2024,7 +2057,7 @@ if __name__ == "__main__":
             "XC_VM package not found or invalid. Please download manually.", col.FAIL
         )
         printc(
-            "You can download from: https://github.com/Vateron-Media/XC_VM/releases",
+            "You can download from: https://github.com/TalaveraSama/fork_xc_vm/releases",
             col.OKBLUE,
         )
         sys.exit(1)

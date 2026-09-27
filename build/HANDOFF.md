@@ -53,9 +53,64 @@ see the first two entries under "Faults found in the fork's own CI" below.
 The Actions tab is the only way in: a session token scoped to this repo
 **cannot dispatch workflows** (`HTTP 403` on `actions/workflows/*/dispatches`).
 
+**The fixed workflows have to reach `main` first.** `workflow_dispatch` runs
+the copy on the default branch, and the repaired YAML is on
+`arena/01a0e51d-fork-xc-vm` behind PR #1. Merge, then run the three.
+
+Until a release exists here, the redirection is inert and upstream still wins
+by default. Resolved live against the API while writing this:
+
+    TalaveraSama/fork_xc_vm        -> None
+    Vateron-Media/XC_VM_Binaries   -> 29062026
+    ==> source chosen: Vateron-Media/XC_VM_Binaries
+
+That is `resolve_binaries_source()` run verbatim. The fork is first in the
+list and is skipped because it has nothing to offer yet.
+
 Confirmed ready for it: upstream still publishes `2.3.9` as a stable release
 with `xc_vm.tar.gz` (174 MB) and `hashes.md5`, and `XC_VM_Binaries` still has
 `29062026` with 7 assets. Both mirrors have something to copy.
+
+## What still comes from Vateron-Media
+
+Checked end to end against the code, not assumed.
+
+**Independent — resolves to this fork, upstream only as a fallback:**
+
+| Piece | Where it is decided |
+| --- | --- |
+| Panel archive (`XC_VM.zip`) | `PANEL_SOURCES` in `build/install` |
+| Distribution binaries | `BINARIES_SOURCES` in `build/install` |
+| In-panel updater | `GIT_OWNER_MAIN` / `GIT_REPO_MAIN` |
+| Binaries refresh from the panel | `GIT_OWNER_BIN` / `GIT_REPO_BIN` |
+
+`build/install` used to hardcode `Vateron-Media/XC_VM` for `XC_VM.zip` with no
+alternative, so an install run without a local archive fetched the *unpatched*
+panel — none of the fixes in this tree, and an updater pointing back upstream.
+It now walks `PANEL_SOURCES`, verifies each download against the `hashes.md5`
+of the same release rather than a fixed owner, and skips the `binaries-` and
+`base-` mirror tags when picking the panel release.
+
+Note the installer prefers a local `xc_vm.tar.gz` / `XC_VM.zip` before any
+network call, so installing from a ZIP built here never touches GitHub at all.
+
+**Still upstream, by the original design decision — data, not panel code:**
+
+| Piece | Source | When |
+| --- | --- | --- |
+| GeoLite2 GeoIP databases | `Vateron-Media/XC_VM_Update` | `cron:maxmind`, also at install |
+| Proxy-node archive | `Vateron-Media/XC_VM_Proxy` | `cron:proxy`, also at install |
+
+Both run through the panel's own cron commands at the end of `install`, and
+both are **non-fatal** — `run_command` never raises, so if those repositories
+vanished the install would still complete, just without GeoIP and without a
+local proxy-node archive. Mirroring them would take a third workflow shaped
+like `mirror.yml` plus splitting `GIT_OWNER` the way `GIT_OWNER_MAIN` and
+`GIT_OWNER_BIN` already are.
+
+Everything else naming Vateron-Media is inert: copyright headers, a curl
+User-Agent string in `GitHubReleases.php`, and the `repository` metadata of
+the bundled `plex` and `watch` modules.
 
 ## How the release is built
 
