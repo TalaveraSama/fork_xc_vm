@@ -95,17 +95,71 @@ jobs:
           echo "::error::no base layer: no committed bin/, and no xc_vm.tar.gz in $GITHUB_REPOSITORY base-$version or Vateron-Media/XC_VM $version"
           exit 1
 
-      # Scoped to what this repository changes on top of upstream. Linting the
-      # whole tree would only re-test upstream's own CI, and a false positive
-      # from a newer PHP than the bundled 8.1 would block the release.
-      - name: Lint changed PHP sources
+      # Scoped to what this fork changes on top of upstream -- the manifest in
+      # .github/patched-upstream-files.txt -- plus the module it adds. Linting
+      # the whole tree would only re-test upstream's own CI, and a false
+      # positive from a newer PHP than the bundled 8.1 would block the release.
+      #
+      # This step used to diff against a hardcoded base commit. That SHA
+      # belonged to the private working repo, so here `git diff` aborted with
+      # "Invalid symmetric difference expression", wrote to stderr, and the
+      # loop read nothing: the step went green having linted zero files, which
+      # is precisely the guard that is supposed to stop a SyntaxError reaching
+      # someone's server. Hence the counts and the two hard failures below --
+      # an empty file set, or a manifest entry missing from the tree.
+      - name: Lint the PHP this fork owns
         run: |
+          set -euo pipefail
           php -v
+
+          manifest=.github/patched-upstream-files.txt
+          [ -f "$manifest" ] || { echo "::error::missing $manifest"; exit 1; }
+
+          entries=0
+          missing=0
+          files=$(mktemp)
+
+          while IFS= read -r f || [ -n "$f" ]; do
+            case "$f" in ''|'#'*) continue ;; esac
+            entries=$((entries + 1))
+            if [ ! -f "$f" ]; then
+              echo "::error::listed in $manifest but not in the tree: $f"
+              missing=1
+              continue
+            fi
+            case "$f" in *.php) printf '%s\n' "$f" >> "$files" ;; esac
+          done < "$manifest"
+
+          [ "$entries" -gt 0 ] || { echo "::error::$manifest lists no files"; exit 1; }
+          [ "$missing" -eq 0 ] || exit 1
+
+          # Everything the fork adds of its own. dev/ is an offline preview
+          # harness excluded from releases, but a parse error there still means
+          # a broken commit, so it is linted too.
+          if [ -d Modules/flussonic_1f4a9 ]; then
+            find Modules/flussonic_1f4a9 -type f -name '*.php' >> "$files"
+          fi
+
+          sort -u -o "$files" "$files"
+          count=$(wc -l < "$files")
+          echo "manifest entries: $entries -- PHP files to lint: $count"
+          [ "$count" -gt 0 ] || {
+            echo "::error::file set is empty; refusing to pass a lint that checked nothing"
+            exit 1
+          }
+
           fail=0
           while IFS= read -r f; do
-            php -l "$f" > /dev/null || { echo "SYNTAX ERROR: $f"; fail=1; }
-          done < <(git diff --name-only 5fa97380b9169247f11583c6d1fd208d1b2a46a0...HEAD -- '*.php' \
-                    | grep -v '^vendor/' | while read -r f; do [ -f "$f" ] && echo "$f"; done)
+            if php -l "$f" > /dev/null 2>&1; then
+              echo "OK            $f"
+            else
+              echo "SYNTAX ERROR  $f"
+              php -l "$f" || true
+              fail=1
+            fi
+          done < "$files"
+
+          echo "linted $count file(s)"
           exit $fail
 
       # compile(), not ast.parse(): the latter accepts symbol-table errors like

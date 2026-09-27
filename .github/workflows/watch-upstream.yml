@@ -55,12 +55,47 @@ jobs:
             exit 0
           fi
 
+          # The list of files we patch is shared with build-release.yml. It
+          # used to be seven paths hardcoded here, which had already fallen
+          # behind the tree; reading the manifest is what keeps the two in step.
+          manifest=.github/patched-upstream-files.txt
+          if [ ! -s "$manifest" ]; then
+            echo "::error::missing or empty $manifest"
+            exit 1
+          fi
+          patched=$(grep -cvE '^[[:space:]]*(#|$)' "$manifest")
+          echo "tracking $patched patched file(s)"
+
           # Which of our patches does that release actually touch? That is the
           # whole cost of the upgrade -- everything else merges cleanly.
-          gh api "repos/$UPSTREAM/compare/$ours...$theirs" \
-            --jq '.files[].filename' > /tmp/changed.txt || : > /tmp/changed.txt
+          #
+          # Asked per file by blob SHA, not by grepping the compare endpoint's
+          # file list. That list is capped at 300 entries and does not
+          # paginate, so across a wide gap it silently omits files -- and every
+          # omission reads as "applies cleanly", which is the most expensive
+          # direction to be wrong in. Measured on 2.3.9...2.5.3: the truncated
+          # list reported one collision, the blob comparison found twelve.
+          # Fifteen extra API calls buy an answer that is exact.
           stats=$(gh api "repos/$UPSTREAM/compare/$ours...$theirs" \
-                  --jq '"\(.total_commits) commits, \(.files | length) files"')
+                  --jq '"\(.total_commits) commits, \(.files | length)\(if (.files|length) >= 300 then "+ (list truncated)" else "" end) files"')
+
+          collisions=0
+          : > /tmp/verdicts.txt
+          while IFS= read -r f || [ -n "$f" ]; do
+            case "$f" in ''|'#'*) continue ;; esac
+            before=$(gh api "repos/$UPSTREAM/contents/src/$f?ref=$ours"   --jq '.sha' 2>/dev/null || echo '')
+            after=$(gh api  "repos/$UPSTREAM/contents/src/$f?ref=$theirs" --jq '.sha' 2>/dev/null || echo '')
+            if [ -z "$after" ]; then
+              printf 'gone|%s\n' "$f" >> /tmp/verdicts.txt
+              collisions=$((collisions + 1))
+            elif [ "$before" != "$after" ]; then
+              printf 'changed|%s\n' "$f" >> /tmp/verdicts.txt
+              collisions=$((collisions + 1))
+            else
+              printf 'clean|%s\n' "$f" >> /tmp/verdicts.txt
+            fi
+          done < "$manifest"
+          echo "$collisions of $patched patched files collide with $theirs"
 
           {
             echo "Upstream's latest stable release is \`$theirs\`; this fork ships \`$ours\`."
@@ -69,19 +104,17 @@ jobs:
             echo
             echo "## Our patches on upstream files"
             echo
-            echo "These are the only files this fork changes outside its own additions."
-            echo "A tick means upstream also changed it, so the patch has to be re-applied by hand:"
+            echo "These are the only $patched files this fork changes outside its own"
+            echo "additions, from \`$manifest\`. **$collisions of $patched** have to be"
+            echo "re-applied by hand -- compared blob by blob, so the count is exact:"
             echo
-            for f in Cli/Commands/StatusCommand.php Core/Module/ModuleMigrator.php \
-                     Public/Views/admin/topbar.php migrations/002_add_maxmind_cron.sql \
-                     migrations/008_add_module_updates_cron.sql \
-                     migrations/009_add_proxy_cron.sql service; do
-              if grep -qxF "src/$f" /tmp/changed.txt; then
-                echo "- [ ] \`$f\` — **upstream changed this too**"
-              else
-                echo "- [x] \`$f\` — applies cleanly"
-              fi
-            done
+            while IFS='|' read -r verdict f; do
+              case "$verdict" in
+                changed) echo "- [ ] \`$f\` — **upstream changed this too**" ;;
+                gone)    echo "- [ ] \`$f\` — **upstream removed this file**" ;;
+                *)       echo "- [x] \`$f\` — applies cleanly" ;;
+              esac
+            done < /tmp/verdicts.txt
             echo
             echo "Everything else we add lives in \`Modules/flussonic_1f4a9/\`, \`build/\`"
             echo "and \`.github/\`, which upstream never touches."
