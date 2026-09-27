@@ -1,0 +1,120 @@
+name: Mirror upstream base archive
+
+# Copies upstream's deploy archive for the version this fork ships into a
+# release tagged `base-<version>`, so building a release here stops depending
+# on Vateron-Media being reachable.
+#
+# The fork keeps only source in git -- committing bin/ would mean 677 MB in
+# every clone -- so the build needs a whole deploy tree from somewhere. This
+# puts one in the fork's own releases. `build-release.yml` looks here first
+# and falls back to upstream, so the first run of this workflow is what
+# completes the fork's independence.
+#
+# Published as a prerelease: this repository also holds the panel's own
+# releases, and the in-panel updater only considers stable ones.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Panel version to mirror (blank = read from AppConfig.php)'
+        required: false
+        type: string
+  schedule:
+    - cron: '30 4 * * 1'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mirror-base
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: Vateron-Media/XC_VM
+
+jobs:
+  mirror:
+    name: Mirror the base archive
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: v
+        run: |
+          set -euo pipefail
+          v='${{ inputs.version }}'
+          if [ -z "$v" ]; then
+            v=$(sed -nE "s/.*define\('XC_VM_VERSION', *'([^']+)'\).*/\1/p" \
+                Core/Config/AppConfig.php | head -1)
+          fi
+          [ -n "$v" ] || { echo "::error::could not determine the version"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "tag=base-$v" >> "$GITHUB_OUTPUT"
+          echo "mirroring $UPSTREAM @ $v"
+
+      - name: Skip if already mirrored
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --json assets \
+               --jq '[.assets[].name] | index("xc_vm.tar.gz")' 2>/dev/null | grep -qv null; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "already mirrored"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download and verify
+        if: steps.check.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dl
+          gh release download "$VERSION" --repo "$UPSTREAM" \
+            --pattern 'xc_vm.tar.gz' --pattern 'hashes.md5' --dir dl
+          ls -la dl
+
+          if [ -f dl/hashes.md5 ]; then
+            expected=$(awk '$2 == "xc_vm.tar.gz" {print $1}' dl/hashes.md5)
+            actual=$(md5sum dl/xc_vm.tar.gz | awk '{print $1}')
+            if [ -n "$expected" ] && [ "$expected" != "$actual" ]; then
+              echo "::error::md5 mismatch: expected $expected, got $actual"
+              exit 1
+            fi
+            echo "md5 verified: $actual"
+          else
+            echo "::warning::upstream published no hashes.md5 for $VERSION"
+          fi
+
+          tar -tzf dl/xc_vm.tar.gz > /dev/null
+          echo "archive opens cleanly"
+
+      - name: Publish
+        if: steps.check.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "Base deploy tree $VERSION" \
+              --notes "Upstream's \`xc_vm.tar.gz\` for $VERSION, mirrored unmodified from
+[\`$UPSTREAM\`](https://github.com/$UPSTREAM/releases/tag/$VERSION) and verified
+against its \`hashes.md5\`.
+
+Used as the base layer by \`build-release.yml\`, so building a release here does
+not depend on upstream staying reachable. Not a panel release -- see the
+version-tagged ones for those." \
+              --prerelease
+          fi
+          gh release upload "$TAG" dl/* --clobber

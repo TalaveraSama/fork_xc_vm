@@ -1,0 +1,501 @@
+#!/usr/bin/python3
+"""
+Diagnose a live XC_VM install and finish what the installer left undone.
+
+`install` treats several late steps as non-fatal: a failed schema migration is
+"not recorded — will retry on next run", and a bundled module that fails to
+install is logged and skipped. The install then reports success. This checks
+what actually landed, repairs it, and — because the installer derives the
+panel URL from whichever interface happens to route to 8.8.8.8, which on a
+host running a VPN or WARP tunnel is not an address you can reach — prints
+every URL the panel is really listening on.
+
+    sudo python3 doctor              # check and repair
+    sudo python3 doctor --check      # report only, change nothing
+
+Repair re-runs `console.php status 1`, which applies pending migrations and
+re-syncs bundled modules. Both are idempotent.
+"""
+
+import argparse
+import glob
+import os
+import re
+import socket
+import subprocess
+import sys
+
+HOME = "/home/xc_vm"
+CONFIG_INI = HOME + "/config/config.ini"
+PHP = HOME + "/bin/php/bin/php"
+CONSOLE = HOME + "/console.php"
+CODES_DIR = HOME + "/bin/nginx/conf/codes"
+PORTS_DIR = HOME + "/bin/nginx/conf/ports"
+
+
+class col:
+    OK = "\033[92m"
+    INFO = "\033[94m"
+    WARN = "\033[93m"
+    FAIL = "\033[91m"
+    BOLD = "\033[1m"
+    END = "\033[0m"
+
+
+def say(msg, c=col.INFO):
+    print(c + msg + col.END)
+
+
+def step(msg):
+    print("\n" + col.BOLD + "==> " + msg + col.END)
+
+
+def sh(cmd):
+    p = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    return p.returncode, (p.stdout or ""), (p.stderr or "")
+
+
+def q(s):
+    return "'" + str(s).replace("'", "'\\''") + "'"
+
+
+PROBLEMS = []
+
+
+def problem(msg):
+    PROBLEMS.append(msg)
+    say("    " + msg, col.FAIL)
+
+
+# ─────────────────────────────────────────────────────────────────
+
+def read_config():
+    cfg = {"host": "127.0.0.1", "database": "xc_vm", "port": "3306"}
+    if not os.path.exists(CONFIG_INI):
+        return cfg
+    try:
+        text = open(CONFIG_INI, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return cfg
+    for key in ("hostname", "database", "port", "username", "password"):
+        m = re.search(r'^\s*%s\s*=\s*"?([^"\n;]+)"?\s*$' % key, text, re.M)
+        if m:
+            cfg["host" if key == "hostname" else key] = m.group(1).strip()
+    return cfg
+
+
+def mysql(cfg, statement, database=None):
+    client = "mariadb" if os.path.exists("/usr/bin/mariadb") else "mysql"
+    db = database or cfg.get("database", "xc_vm")
+    cmd = "%s -h %s -P %s -u %s -p%s %s -N -B -e %s 2>&1" % (
+        client, q(cfg.get("host", "127.0.0.1")), q(cfg.get("port", "3306")),
+        q(cfg.get("username", "")), q(cfg.get("password", "")), q(db), q(statement),
+    )
+    return sh(cmd)
+
+
+def check_database(cfg):
+    step("Database")
+    if not cfg.get("username"):
+        problem("no credentials in %s" % CONFIG_INI)
+        return False
+    rc, out, _ = mysql(cfg, "SELECT COUNT(*) FROM information_schema.tables "
+                            "WHERE table_schema = %s" % q(cfg["database"]))
+    if rc != 0:
+        first = (out.strip().splitlines() or ["no output"])[0]
+        problem("cannot connect as %s: %s" % (cfg["username"], first))
+        return False
+    tables = (out or "").strip()
+    say("    connected — %s has %s tables" % (cfg["database"], tables), col.OK)
+    return True
+
+
+def check_migrations(cfg):
+    step("Schema migrations")
+    files = sorted(os.path.basename(f) for f in glob.glob(HOME + "/migrations/*.sql"))
+    if not files:
+        say("    no migrations directory", col.WARN)
+        return []
+    rc, out, _ = mysql(cfg, "SELECT `migration` FROM `migrations`")
+    applied = set((out or "").split()) if rc == 0 else set()
+    pending = [f for f in files if f not in applied]
+    for f in files:
+        mark = "applied" if f in applied else "PENDING"
+        colour = col.OK if f in applied else col.WARN
+        say("    %-8s %s" % (mark, f), colour)
+    if pending:
+        PROBLEMS.append("%d migration(s) not applied" % len(pending))
+    return pending
+
+
+def check_modules(cfg):
+    step("Bundled modules")
+    overrides = HOME + "/config/modules.php"
+    if os.path.exists(overrides):
+        text = open(overrides, encoding="utf-8", errors="replace").read()
+        names = re.findall(r"'([a-z0-9_]+)'\s*=>\s*\n?\s*array", text)
+        if names:
+            say("    recorded: " + ", ".join(sorted(set(names))), col.OK)
+
+    rc, out, _ = mysql(cfg, "SELECT COUNT(*) FROM information_schema.tables "
+                            "WHERE table_schema = %s AND table_name IN "
+                            "('flussonic_servers','flussonic_streams')" % q(cfg["database"]))
+    found = (out or "0").strip()
+    if rc == 0 and found == "2":
+        say("    flussonic tables present", col.OK)
+        return True
+    problem("flussonic tables missing (found %s of 2) — module did not install" % found)
+    return False
+
+
+BINARIES = [
+    "bin/nginx/sbin/nginx",
+    "bin/nginx_rtmp/sbin/nginx_rtmp",
+    "bin/php/bin/php",
+    "bin/php/sbin/php-fpm",
+    "bin/redis/redis-server",
+]
+
+
+def check_ownership():
+    """Everything is extracted as root and then chowned. If that chown did not
+    happen, nginx and php-fpm run as xc_vm and silently cannot read the tree."""
+    step("Ownership")
+    import pwd as _pwd
+    try:
+        _pwd.getpwnam("xc_vm")
+        say("    user xc_vm exists", col.OK)
+    except KeyError:
+        problem("system user xc_vm does not exist")
+        return False
+
+    rc, out, _ = sh("stat -c '%%U' %s" % q(HOME))
+    owner = (out or "").strip()
+    if owner == "xc_vm":
+        say("    %s owned by xc_vm" % HOME, col.OK)
+    else:
+        problem("%s is owned by %s, not xc_vm" % (HOME, owner or "?"))
+        return False
+
+    rc, out, _ = sh("find %s -maxdepth 2 ! -user xc_vm -printf '%%p\\n' 2>/dev/null | head -5"
+                    % q(HOME))
+    stray = [l for l in (out or "").splitlines() if l.strip()]
+    if stray:
+        problem("not owned by xc_vm: " + ", ".join(stray))
+        return False
+    return True
+
+
+def check_binaries():
+    """`service` starts nginx with its output sent to /dev/null, so a binary
+    that cannot even load its libraries fails completely silently."""
+    step("Runtime binaries")
+    ok = True
+    for rel in BINARIES:
+        path = os.path.join(HOME, rel)
+        if not os.path.exists(path):
+            problem("missing %s" % rel)
+            ok = False
+            continue
+        if not os.access(path, os.X_OK):
+            problem("%s is not executable" % rel)
+            ok = False
+            continue
+        rc, out, err = sh("ldd %s 2>&1 | grep 'not found' || true" % q(path))
+        missing = [l.strip().split()[0] for l in (out or "").splitlines() if l.strip()]
+        if missing:
+            problem("%s needs missing libraries: %s" % (rel, ", ".join(sorted(set(missing)))))
+            ok = False
+        else:
+            say("    ok  %s" % rel, col.OK)
+    return ok
+
+
+LOG_DIRS = ["bin/nginx/logs", "bin/nginx_rtmp/logs", "bin/php/sockets",
+            "bin/php/var/log", "bin/php/sessions"]
+
+
+def check_log_dirs(fix=False):
+    """nginx refuses to start if it cannot write its error log or pid file.
+
+    A binary layer captured from a running panel carries those files, and the
+    blanket `chmod 550` over bin/nginx leaves them read-only even for their
+    owner -- so nginx dies with EACCES while nginx_rtmp, which that pass does
+    not cover, starts normally.
+    """
+    step("Writable runtime directories")
+    ok = True
+    for rel in LOG_DIRS:
+        path = os.path.join(HOME, rel)
+        if not os.path.isdir(path):
+            if fix:
+                os.makedirs(path, exist_ok=True)
+                sh("chown xc_vm:xc_vm %s && chmod 0750 %s" % (q(path), q(path)))
+                say("    created %s" % rel, col.OK)
+                continue
+            problem("%s is missing" % rel)
+            ok = False
+            continue
+
+        rc, out, _ = sh("sudo -u xc_vm test -w %s && echo yes || echo no" % q(path))
+        writable = "yes" in (out or "")
+
+        stale = [f for f in glob.glob(path + "/*")
+                 if os.path.isfile(f) and not os.access(f, os.W_OK)]
+
+        if writable and not stale:
+            say("    ok  %s" % rel, col.OK)
+            continue
+
+        if not fix:
+            if not writable:
+                problem("%s is not writable by xc_vm" % rel)
+            if stale:
+                problem("read-only files in %s: %s"
+                        % (rel, ", ".join(os.path.basename(f) for f in stale)))
+            ok = False
+            continue
+
+        for f in glob.glob(path + "/*"):
+            if f.endswith(".pid") or f.endswith(".sock"):
+                os.remove(f)
+            else:
+                sh("chmod u+rw %s" % q(f))
+        sh("chown -R xc_vm:xc_vm %s && chmod 0750 %s" % (q(path), q(path)))
+        say("    repaired %s" % rel, col.OK)
+    return ok
+
+
+def check_nginx_config():
+    step("nginx configuration")
+    nginx = os.path.join(HOME, "bin/nginx/sbin/nginx")
+    if not os.path.exists(nginx):
+        return False
+    rc, out, err = sh("sudo -u xc_vm %s -t 2>&1" % q(nginx))
+    text = (out + err).strip()
+    if rc == 0:
+        say("    configuration test is successful", col.OK)
+        return True
+    problem("nginx will not start")
+    for line in text.splitlines()[:8]:
+        print("      " + line)
+    return False
+
+
+def show_logs():
+    step("Recent errors")
+    shown = False
+    rc, out, _ = sh("journalctl -u xc_vm -n 15 --no-pager 2>/dev/null | tail -n 12")
+    if (out or "").strip():
+        print("    -- journalctl -u xc_vm")
+        for line in out.strip().splitlines():
+            print("      " + line)
+        shown = True
+    for log in (HOME + "/tmp/logs/boot.log",
+                HOME + "/bin/nginx/logs/error.log",
+                HOME + "/bin/php/logs/error.log"):
+        if os.path.exists(log) and os.path.getsize(log) > 0:
+            rc, out, _ = sh("tail -n 8 %s" % q(log))
+            if (out or "").strip():
+                print("    -- %s" % log)
+                for line in out.strip().splitlines():
+                    print("      " + line)
+                shown = True
+    if not shown:
+        say("    nothing in the logs", col.WARN)
+
+
+def check_service():
+    step("Service")
+    rc, out, _ = sh("systemctl is-active xc_vm")
+    state = out.strip() or "unknown"
+    if state == "active":
+        say("    xc_vm is active", col.OK)
+    else:
+        problem("xc_vm is %s" % state)
+
+    rc, out, _ = sh("pgrep -u xc_vm -c nginx || true")
+    n = (out or "0").strip()
+    if n and n != "0":
+        say("    nginx: %s worker(s) as xc_vm" % n, col.OK)
+    else:
+        problem("no nginx running as xc_vm")
+    return state == "active"
+
+
+def configured_ports():
+    ports = []
+    for name in ("http.conf", "https.conf"):
+        path = os.path.join(PORTS_DIR, name)
+        if not os.path.exists(path):
+            continue
+        try:
+            m = re.search(r"listen\s+(\d+)", open(path, encoding="utf-8", errors="replace").read())
+            if m:
+                ports.append((name.replace(".conf", ""), m.group(1)))
+        except OSError:
+            pass
+    return ports
+
+
+def listening_any():
+    return any(listening(p) for _, p in configured_ports())
+
+
+def listening(port):
+    rc, out, _ = sh("ss -lnt 2>/dev/null | awk '{print $4}'")
+    return any(line.rsplit(":", 1)[-1] == str(port) for line in out.splitlines())
+
+
+def local_addresses():
+    """Every usable IPv4, tunnels last.
+
+    The installer picks whichever address routes to 8.8.8.8. On a host running
+    WARP or a VPN that is the tunnel address, which nobody can browse to.
+    """
+    rc, out, _ = sh("ip -o -4 addr show 2>/dev/null")
+    addrs = []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        iface, cidr = parts[1], parts[3]
+        ip = cidr.split("/")[0]
+        if ip.startswith("127."):
+            continue
+        addrs.append((interface_rank(iface), iface, ip))
+    addrs.sort(key=lambda a: a[0])
+    return addrs
+
+
+def interface_rank(iface):
+    """0 = a real NIC, 1 = container/bridge plumbing, 2 = a tunnel."""
+    if re.match(r"(wg|tun|tap|warp|ppp|zt|tail|gpd|nebula)", iface):
+        return 2
+    if re.match(r"(docker|br-|veth|virbr|lxc|cni|flannel|kube)", iface):
+        return 1
+    return 0
+
+
+def access_codes():
+    out = []
+    for path in sorted(glob.glob(CODES_DIR + "/*.conf")):
+        name = os.path.basename(path)[:-5]
+        if name.startswith("template"):
+            continue
+        out.append(name)
+    return out
+
+
+def report_urls():
+    step("Where the panel is reachable")
+    ports = configured_ports()
+    if not ports:
+        say("    could not read %s" % PORTS_DIR, col.WARN)
+        return
+    for scheme, port in ports:
+        mark = "listening" if listening(port) else "NOT LISTENING"
+        colour = col.OK if listening(port) else col.FAIL
+        say("    %-5s port %-6s %s" % (scheme, port, mark), colour)
+        if not listening(port):
+            PROBLEMS.append("nothing is listening on port %s" % port)
+
+    codes = access_codes()
+    if not codes:
+        say("    no access code found in %s" % CODES_DIR, col.WARN)
+        return
+
+    http_port = dict(ports).get("http", "80")
+    print()
+    say("    Open one of these:", col.BOLD)
+    labels = {1: "   <- container bridge", 2: "   <- tunnel, probably not reachable"}
+    for rank, iface, ip in local_addresses():
+        for code in codes:
+            print("      http://%s:%s/%s   (%s)%s"
+                  % (ip, http_port, code, iface, labels.get(rank, "")))
+
+
+def repair(cfg):
+    step("Repairing")
+    if not os.path.exists(PHP) or not os.path.exists(CONSOLE):
+        problem("cannot find %s or %s" % (PHP, CONSOLE))
+        return
+    say("    running console.php status 1 (migrations + bundled modules)")
+    p = subprocess.run("%s %s status 1" % (q(PHP), q(CONSOLE)), shell=True)
+    if p.returncode != 0:
+        say("    console.php exited %d" % p.returncode, col.WARN)
+    sh("systemctl restart xc_vm")
+    say("    service restarted", col.OK)
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="doctor",
+                                 description="Check, and optionally repair, an XC_VM install.")
+    ap.add_argument("--check", action="store_true", help="report only, change nothing")
+    args = ap.parse_args()
+
+    if os.geteuid() != 0:
+        say("Run this as root:  sudo python3 doctor", col.FAIL)
+        return 1
+
+    print(col.BOLD + "\nXC_VM doctor" + col.END)
+
+    if not os.path.isdir(HOME):
+        say("\n%s does not exist — the panel is not installed." % HOME, col.FAIL)
+        return 1
+
+    cfg = read_config()
+    ok = check_database(cfg)
+    pending, modules_ok = [], True
+    if ok:
+        pending = check_migrations(cfg)
+        modules_ok = check_modules(cfg)
+    check_ownership()
+    check_binaries()
+    logs_ok = check_log_dirs()
+    running = check_service()
+    if not running or not listening_any():
+        check_nginx_config()
+    report_urls()
+    if PROBLEMS:
+        show_logs()
+
+    needs_repair = (not logs_ok) or (ok and (pending or not modules_ok))
+    if needs_repair and not args.check:
+        if not logs_ok:
+            step("Fixing runtime directories")
+            check_log_dirs(fix=True)
+            PROBLEMS[:] = [p for p in PROBLEMS
+                           if "writable by xc_vm" not in p and "read-only files" not in p]
+        repair(cfg)
+        step("Re-checking")
+        pending = check_migrations(cfg)
+        modules_ok = check_modules(cfg)
+        PROBLEMS[:] = [p for p in PROBLEMS
+                       if "migration" not in p and "flussonic" not in p]
+        if pending:
+            PROBLEMS.append("%d migration(s) still pending" % len(pending))
+        if not modules_ok:
+            PROBLEMS.append("flussonic tables still missing")
+
+    print()
+    if PROBLEMS:
+        say("Still wrong:", col.WARN)
+        for p in PROBLEMS:
+            print("    - " + p)
+        print("\n    Logs:  journalctl -u xc_vm -n 50 --no-pager")
+        print("           tail -n 50 %s/tmp/logs/*.log" % HOME)
+        print()
+        return 1
+
+    say("Everything checks out.", col.OK)
+    print()
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print()
+        sys.exit(130)

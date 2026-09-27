@@ -1,0 +1,603 @@
+#!/usr/bin/python3
+"""
+Uninstall XC_VM.
+
+Reverses what `install` does, in the order that keeps the box usable at every
+step: stop the service, detach the tmpfs mounts, drop the databases, then
+remove the tree and the account.
+
+    sudo python3 uninstall              # asks before touching anything
+    sudo python3 uninstall --dry-run    # print the plan, change nothing
+    sudo python3 uninstall --yes        # no prompts
+
+By default it writes a backup to /root/xc_vm-uninstall-<timestamp>/ first:
+a dump of both databases, the config/ directory and credentials.txt.
+
+Things the installer changed that CANNOT be reversed automatically are listed
+at the end rather than guessed at — notably /etc/sysctl.conf, which `install`
+overwrites without keeping a copy.
+"""
+
+import argparse
+import datetime
+import glob
+import os
+import pwd
+import re
+import shutil
+import subprocess
+import sys
+
+HOME = "/home/xc_vm"
+USER = "xc_vm"
+DATABASES = ["xc_vm", "xc_vm_migrate"]
+UNIT = "/etc/systemd/system/xc_vm.service"
+INITD = "/etc/init.d/xc_vm"
+CREDS = "/root/credentials.txt"
+MOUNTS = [HOME + "/content/streams", HOME + "/tmp"]
+LIMIT_LINE = "DefaultLimitNOFILE=655350"
+SYSTEMD_CONFS = ["/etc/systemd/system.conf", "/etc/systemd/user.conf"]
+
+
+class col:
+    OK = "\033[92m"
+    INFO = "\033[94m"
+    WARN = "\033[93m"
+    FAIL = "\033[91m"
+    BOLD = "\033[1m"
+    END = "\033[0m"
+
+
+def say(msg, c=col.INFO):
+    print(c + msg + col.END)
+
+
+def step(msg):
+    print("\n" + col.BOLD + "==> " + msg + col.END)
+
+
+ARGS = None
+NOTES = []
+
+
+def note(msg):
+    NOTES.append(msg)
+
+
+def run(cmd, check=False, capture=False, quiet=False):
+    """Run a shell command, honouring --dry-run."""
+    if ARGS.dry_run:
+        print("    [dry-run] " + cmd)
+        return 0, "", ""
+    if not quiet:
+        print("    $ " + cmd)
+    p = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    if capture:
+        return p.returncode, p.stdout, p.stderr
+    if check and p.returncode != 0:
+        say("      failed: " + (p.stderr or "").strip(), col.WARN)
+    return p.returncode, p.stdout, p.stderr
+
+
+def remove_path(path):
+    if not os.path.lexists(path):
+        return False
+    if ARGS.dry_run:
+        print("    [dry-run] rm -rf " + path)
+        return True
+    print("    rm -rf " + path)
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        try:
+            os.remove(path)
+        except OSError as e:
+            say("      could not remove %s: %s" % (path, e), col.WARN)
+            return False
+    return True
+
+
+# ─────────────────────────────────────────────────────────────────
+# MariaDB access
+# ─────────────────────────────────────────────────────────────────
+
+def read_credentials():
+    """Pull the MariaDB root password and the panel DB user out of the file
+    the installer leaves in /root."""
+    creds = {}
+    if not os.path.exists(CREDS):
+        return creds
+    try:
+        with open(CREDS, "r", encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return creds
+    m = re.search(r"^Password:\s*(.+)$", text, re.M)
+    if m:
+        creds["root_password"] = m.group(1).strip()
+    m = re.search(r"^XC_VM Username:\s*(.+)$", text, re.M)
+    if m:
+        creds["db_user"] = m.group(1).strip()
+    m = re.search(r"^Database:\s*(.+)$", text, re.M)
+    if m:
+        creds["database"] = m.group(1).strip()
+    return creds
+
+
+MYSQL_WHY = []
+
+
+def mysql_base():
+    """Find a working way to talk to MariaDB as an administrator.
+
+    Socket auth first — as root that usually just works and needs no secret.
+    Otherwise fall back to the password `install` saved. Every failure is
+    recorded: "not reachable" on its own tells the operator nothing, and the
+    difference between a stopped server and a rejected password decides what
+    they should do next.
+    """
+    MYSQL_WHY.clear()
+
+    # MariaDB 10.3 (Ubuntu 20.04) has no `mariadb` binary; the client is `mysql`.
+    client = shutil.which("mariadb") or shutil.which("mysql")
+    if not client:
+        MYSQL_WHY.append("no mariadb/mysql client on PATH")
+        return None
+
+    def attempt(base, how):
+        p = subprocess.run(base + " -N -B -e 'SELECT 1'",
+                           shell=True, capture_output=True, text=True)
+        if p.returncode == 0:
+            return True
+        err = (p.stderr or p.stdout or "").strip().splitlines()
+        MYSQL_WHY.append("%s: %s" % (how, err[0] if err else "exit %d" % p.returncode))
+        return False
+
+    if attempt(client + " -u root", "socket auth"):
+        return client + " -u root"
+
+    pw = read_credentials().get("root_password")
+    if not pw:
+        MYSQL_WHY.append("no root password found in " + CREDS)
+        return None
+
+    base = "%s -u root -p%s" % (client, shell_quote(pw))
+    if attempt(base, "password from " + CREDS):
+        return base
+    return None
+
+
+def shell_quote(s):
+    return "'" + str(s).replace("'", "'\\''") + "'"
+
+
+def sql(base, statement, capture=False):
+    cmd = "%s -N -B -e %s" % (base, shell_quote(statement))
+    return run(cmd, capture=capture, quiet=True)
+
+
+# ─────────────────────────────────────────────────────────────────
+# Discovery
+# ─────────────────────────────────────────────────────────────────
+
+def user_exists(name):
+    try:
+        pwd.getpwnam(name)
+        return True
+    except KeyError:
+        return False
+
+
+def active_mounts():
+    found = []
+    try:
+        with open("/proc/mounts", "r") as f:
+            mounted = f.read()
+    except OSError:
+        return found
+    for m in MOUNTS:
+        for line in mounted.splitlines():
+            parts = line.split()
+            if len(parts) > 1 and parts[1] == m:
+                found.append(m)
+                break
+    return found
+
+
+def fstab_lines():
+    if not os.path.exists("/etc/fstab"):
+        return []
+    with open("/etc/fstab", "r", encoding="utf-8", errors="replace") as f:
+        return [l for l in f.read().splitlines() if HOME + "/" in l]
+
+
+def survey():
+    """What of XC_VM is actually on this box."""
+    found = {
+        "tree": os.path.isdir(HOME),
+        "user": user_exists(USER),
+        "unit": os.path.exists(UNIT),
+        "initd": os.path.exists(INITD),
+        "mounts": active_mounts(),
+        "fstab": fstab_lines(),
+        "creds": os.path.exists(CREDS),
+        "databases": [],
+        "db_users": [],
+        "mysql": None,
+    }
+
+    base = mysql_base()
+    found["mysql"] = base
+    if base:
+        rc, out, _ = subprocess.run(
+            "%s -N -B -e 'SHOW DATABASES'" % base,
+            shell=True, capture_output=True, text=True,
+        ).returncode, "", ""
+        p = subprocess.run(
+            "%s -N -B -e 'SHOW DATABASES'" % base,
+            shell=True, capture_output=True, text=True,
+        )
+        if p.returncode == 0:
+            present = set(p.stdout.split())
+            found["databases"] = [d for d in DATABASES if d in present]
+
+        # The panel's DB account is a random 32-char name, so identify it by
+        # its grants on xc_vm rather than by guessing the name.
+        p = subprocess.run(
+            "%s -N -B -e \"SELECT DISTINCT CONCAT(grantee) FROM "
+            "information_schema.schema_privileges WHERE table_schema IN "
+            "('xc_vm','xc_vm_migrate')\"" % base,
+            shell=True, capture_output=True, text=True,
+        )
+        if p.returncode == 0:
+            for g in p.stdout.split("\n"):
+                g = g.strip()
+                if not g or "'root'@" in g:
+                    continue
+                found["db_users"].append(g)
+
+    cred_user = read_credentials().get("db_user")
+    if cred_user:
+        for host in ("localhost", "127.0.0.1"):
+            entry = "'%s'@'%s'" % (cred_user, host)
+            if entry not in found["db_users"]:
+                found["db_users"].append(entry)
+
+    return found
+
+
+def print_plan(f):
+    step("What is on this machine")
+    rows = [
+        ("panel tree", HOME if f["tree"] else "— not present"),
+        ("system user", USER if f["user"] else "— not present"),
+        ("systemd unit", UNIT if f["unit"] else "— not present"),
+        ("init.d script", INITD if f["initd"] else "— not present"),
+        ("tmpfs mounted", ", ".join(f["mounts"]) if f["mounts"] else "— none"),
+        ("fstab entries", "%d line(s)" % len(f["fstab"]) if f["fstab"] else "— none"),
+        ("databases", ", ".join(f["databases"]) if f["databases"] else "— none found"),
+        ("database users", ", ".join(f["db_users"]) if f["db_users"] else "— none found"),
+        ("credentials.txt", CREDS if f["creds"] else "— not present"),
+    ]
+    for k, v in rows:
+        print("    %-17s %s" % (k, v))
+
+    if not f["mysql"]:
+        print()
+        say("    MariaDB is not reachable as root, so its databases and users "
+            "will be left behind:", col.WARN)
+        for why in MYSQL_WHY:
+            print("      - " + why)
+        print("    Fix access and re-run, or drop them by hand afterwards.")
+        print("    Pass --skip-database to stop asking.")
+
+
+# ─────────────────────────────────────────────────────────────────
+# Steps
+# ─────────────────────────────────────────────────────────────────
+
+def do_backup(f):
+    if ARGS.no_backup:
+        say("Skipping backup (--no-backup)", col.WARN)
+        return None
+
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = "/root/xc_vm-uninstall-%s" % stamp
+    step("Backing up to " + dest)
+
+    if not ARGS.dry_run:
+        os.makedirs(dest, exist_ok=True)
+        os.chmod(dest, 0o700)
+    else:
+        print("    [dry-run] mkdir -p " + dest)
+
+    dumper = shutil.which("mariadb-dump") or shutil.which("mysqldump")
+    if f["mysql"] and f["databases"] and dumper:
+        auth = f["mysql"].split(" ", 1)[1]  # reuse "-u root [-p...]"
+        for db in f["databases"]:
+            out = os.path.join(dest, db + ".sql")
+            rc, _, err = run(
+                "%s %s --single-transaction --routines --events %s > %s"
+                % (dumper, auth, db, shell_quote(out)),
+                capture=True,
+            )
+            if rc == 0:
+                say("    dumped %s" % db, col.OK)
+            else:
+                say("    could not dump %s: %s" % (db, (err or "").strip()), col.WARN)
+                note("Database %s was not dumped — check the backup before relying on it." % db)
+    elif f["databases"]:
+        note("Databases were not dumped (no mariadb-dump or no DB access).")
+
+    for src in (os.path.join(HOME, "config"), CREDS):
+        if os.path.exists(src):
+            if ARGS.dry_run:
+                print("    [dry-run] copy %s -> %s" % (src, dest))
+                continue
+            try:
+                target = os.path.join(dest, os.path.basename(src))
+                if os.path.isdir(src):
+                    shutil.copytree(src, target, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(src, target)
+                say("    saved %s" % src, col.OK)
+            except OSError as e:
+                say("    could not copy %s: %s" % (src, e), col.WARN)
+
+    return dest
+
+
+def stop_service(f):
+    step("Stopping the panel")
+    if shutil.which("systemctl"):
+        run("systemctl stop xc_vm 2>/dev/null || true")
+        run("systemctl disable xc_vm 2>/dev/null || true")
+        run("systemctl reset-failed xc_vm 2>/dev/null || true")
+    if os.path.exists(os.path.join(HOME, "service")):
+        run("%s/service stop >/dev/null 2>&1 || true" % HOME)
+    if f["user"]:
+        # The panel's FPM masters daemonise out of the unit's cgroup, so stop
+        # by UID the way the service script itself does.
+        run("pkill -u %s 2>/dev/null || true" % USER)
+        run("sleep 2", quiet=True)
+        run("pkill -9 -u %s 2>/dev/null || true" % USER)
+
+
+def remove_crontab(f):
+    if not f["user"]:
+        return
+    step("Removing the crontab")
+    run("crontab -u %s -r 2>/dev/null || true" % USER)
+
+
+def unmount(f):
+    mounted = f["mounts"]
+    if not mounted and not f["fstab"]:
+        return
+    step("Detaching the tmpfs mounts")
+    for m in mounted:
+        rc, _, _ = run("umount %s" % shell_quote(m), capture=True)
+        if rc != 0:
+            run("umount -l %s 2>/dev/null || true" % shell_quote(m))
+
+    if not f["fstab"]:
+        return
+
+    # Leaving these behind is the one failure that can stop the box booting,
+    # so rewrite fstab rather than leave dangling tmpfs entries.
+    say("    removing %d line(s) from /etc/fstab" % len(f["fstab"]))
+    if ARGS.dry_run:
+        for l in f["fstab"]:
+            print("    [dry-run] drop: " + l)
+        return
+    try:
+        shutil.copy2("/etc/fstab", "/etc/fstab.xc_vm-uninstall.bak")
+        with open("/etc/fstab", "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.read().splitlines()
+        kept = [l for l in lines if HOME + "/" not in l]
+        while kept and kept[-1].strip() == "":
+            kept.pop()
+        with open("/etc/fstab", "w", encoding="utf-8") as fh:
+            fh.write("\n".join(kept) + "\n")
+        say("    /etc/fstab updated (copy at /etc/fstab.xc_vm-uninstall.bak)", col.OK)
+    except OSError as e:
+        say("    could not edit /etc/fstab: %s" % e, col.FAIL)
+        note("EDIT /etc/fstab BY HAND: it still has tmpfs entries for %s, "
+             "which can block boot." % HOME)
+
+
+def drop_databases(f):
+    if ARGS.skip_database:
+        note("Databases kept (--skip-database): " + ", ".join(DATABASES))
+        return
+    if not f["mysql"]:
+        note("Databases left untouched — MariaDB was not reachable as root.")
+        leftovers = ["DROP DATABASE IF EXISTS `%s`;" % d for d in DATABASES]
+        leftovers += ["DROP USER IF EXISTS %s;" % g for g in f["db_users"]]
+        if leftovers:
+            note("Run these once you can log in as root:\n        "
+                 + "\n        ".join(leftovers))
+        return
+    if not f["databases"] and not f["db_users"]:
+        return
+
+    step("Dropping databases and users")
+    for db in f["databases"]:
+        sql(f["mysql"], "DROP DATABASE IF EXISTS `%s`;" % db)
+        say("    dropped %s" % db, col.OK)
+    for grantee in f["db_users"]:
+        sql(f["mysql"], "DROP USER IF EXISTS %s;" % grantee)
+        say("    dropped user %s" % grantee, col.OK)
+    if f["db_users"]:
+        sql(f["mysql"], "FLUSH PRIVILEGES;")
+
+
+def remove_systemd(f):
+    step("Removing the service definition")
+    changed = remove_path(UNIT)
+    changed = remove_path(INITD) or changed
+    if changed and shutil.which("systemctl"):
+        run("systemctl daemon-reload")
+
+
+def revert_limits():
+    pending = []
+    for conf in SYSTEMD_CONFS:
+        if not os.path.exists(conf):
+            continue
+        try:
+            with open(conf, "r", encoding="utf-8", errors="replace") as fh:
+                lines = fh.read().splitlines()
+        except OSError:
+            continue
+        kept = [l for l in lines if l.strip() != LIMIT_LINE]
+        if len(kept) != len(lines):
+            pending.append((conf, kept))
+
+    if not pending:
+        return
+
+    step("Reverting the systemd file-descriptor limit")
+    for conf, kept in pending:
+        if ARGS.dry_run:
+            print("    [dry-run] drop '%s' from %s" % (LIMIT_LINE, conf))
+            continue
+        try:
+            with open(conf, "w", encoding="utf-8") as fh:
+                fh.write("\n".join(kept) + "\n")
+            say("    cleaned %s" % conf, col.OK)
+        except OSError as e:
+            say("    could not edit %s: %s" % (conf, e), col.WARN)
+
+
+def remove_tree(f):
+    if not f["tree"]:
+        return
+    step("Removing " + HOME)
+    remove_path(HOME)
+    if os.path.isdir(HOME) and not ARGS.dry_run:
+        say("    %s is still there — something is holding it" % HOME, col.FAIL)
+        note("%s could not be fully removed; check for busy mounts or open files." % HOME)
+
+
+def remove_account(f):
+    if not f["user"]:
+        return
+    step("Removing the system account")
+    run("userdel %s 2>/dev/null || true" % USER)
+    rc, out, _ = run("getent group %s" % USER, capture=True, quiet=True)
+    if out.strip():
+        run("groupdel %s 2>/dev/null || true" % USER)
+
+
+def optional_cleanup(f):
+    if ARGS.purge_credentials and f["creds"]:
+        step("Removing " + CREDS)
+        remove_path(CREDS)
+    elif f["creds"]:
+        note("%s still holds the MariaDB root password — remove it yourself "
+             "or re-run with --purge-credentials." % CREDS)
+
+    if ARGS.purge_mariadb_repo:
+        repos = glob.glob("/etc/apt/sources.list.d/mariadb.*")
+        if repos:
+            step("Removing the MariaDB apt repository")
+            for r in repos:
+                remove_path(r)
+            note("Run `apt update` to refresh the package lists.")
+
+
+def final_report(backup_dir):
+    step("Done")
+
+    if backup_dir:
+        say("Backup: " + backup_dir, col.OK)
+
+    print()
+    say("Left in place on purpose:", col.BOLD)
+    print("""    /etc/sysctl.conf            `install` OVERWRITES this file and keeps no
+                                copy, so there is nothing to restore. Review it
+                                if this host had custom kernel tuning.
+    MariaDB server config       50-server.cnf (Debian) / server.cnf (RHEL) was
+                                replaced by the installer. MariaDB itself, and
+                                any other database on it, is untouched.
+    System packages             mariadb-server, certbot, iptables-persistent and
+                                the rest stay installed; other software may
+                                depend on them.""")
+
+    if NOTES:
+        print()
+        say("Needs your attention:", col.WARN)
+        for n in NOTES:
+            print("    - " + n)
+    print()
+
+
+# ─────────────────────────────────────────────────────────────────
+
+def main():
+    global ARGS
+
+    ap = argparse.ArgumentParser(
+        prog="uninstall",
+        description="Remove XC_VM from this server.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ap.add_argument("--yes", "-y", action="store_true", help="do not ask for confirmation")
+    ap.add_argument("--dry-run", action="store_true", help="print the plan, change nothing")
+    ap.add_argument("--no-backup", action="store_true", help="do not dump databases or copy config/")
+    ap.add_argument("--skip-database", action="store_true", help="leave the databases and DB users alone")
+    ap.add_argument("--purge-credentials", action="store_true", help="also delete /root/credentials.txt")
+    ap.add_argument("--purge-mariadb-repo", action="store_true", help="also remove the MariaDB apt repository")
+    ARGS = ap.parse_args()
+
+    if os.geteuid() != 0 and not ARGS.dry_run:
+        say("Run this as root:  sudo python3 uninstall", col.FAIL)
+        return 1
+
+    print(col.BOLD + "\nXC_VM uninstaller" + col.END)
+    if ARGS.dry_run:
+        say("Dry run — nothing will be changed.", col.WARN)
+
+    found = survey()
+    print_plan(found)
+
+    nothing = not any([
+        found["tree"], found["user"], found["unit"], found["initd"],
+        found["mounts"], found["fstab"], found["databases"],
+    ])
+    if nothing:
+        say("\nNothing to remove — XC_VM does not appear to be installed.", col.OK)
+        return 0
+
+    if not ARGS.yes and not ARGS.dry_run:
+        print()
+        say("This deletes the panel, its databases and all streaming data.", col.WARN)
+        if not ARGS.no_backup:
+            print("    A backup will be written to /root/ first.")
+        answer = input("\nType UNINSTALL to continue: ").strip()
+        if answer != "UNINSTALL":
+            say("Aborted — nothing was changed.", col.OK)
+            return 1
+
+    backup_dir = do_backup(found)
+    stop_service(found)
+    remove_crontab(found)
+    unmount(found)
+    drop_databases(found)
+    remove_systemd(found)
+    revert_limits()
+    remove_tree(found)
+    remove_account(found)
+    optional_cleanup(found)
+    final_report(backup_dir)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print()
+        say("Interrupted — the server may be half-uninstalled. Re-run to finish.", col.FAIL)
+        sys.exit(130)

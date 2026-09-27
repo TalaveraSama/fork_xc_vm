@@ -1,0 +1,98 @@
+name: Watch upstream
+
+# Opens an issue when Vateron-Media/XC_VM publishes a stable release newer
+# than the version this fork ships, and says up front which of our patches
+# that release collides with.
+#
+# Only stable releases count. Upstream keeps 2.5.x tagged as prereleases, and
+# chasing those would mean rebasing this fork onto code its own authors have
+# not called finished.
+
+on:
+  schedule:
+    # Monday 06:00 UTC, after the binaries mirror has had its turn.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  UPSTREAM: Vateron-Media/XC_VM
+
+jobs:
+  check:
+    name: Compare with upstream
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          ours=$(sed -nE "s/.*define\('XC_VM_VERSION', *'([^']+)'\).*/\1/p" \
+                 Core/Config/AppConfig.php | head -1)
+          theirs=$(gh api "repos/$UPSTREAM/releases" \
+                   --jq 'map(select(.prerelease == false and .draft == false))
+                         | .[0].tag_name')
+
+          echo "ours=$ours  upstream stable=$theirs"
+
+          if [ -z "$theirs" ] || [ "$ours" = "$theirs" ]; then
+            echo "Nothing newer to move to." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          title="Upstream released $theirs (we ship $ours)"
+          if gh issue list --state open --search "$title in:title" \
+               --json title --jq '.[].title' | grep -qxF "$title"; then
+            echo "Already tracked." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Which of our patches does that release actually touch? That is the
+          # whole cost of the upgrade -- everything else merges cleanly.
+          gh api "repos/$UPSTREAM/compare/$ours...$theirs" \
+            --jq '.files[].filename' > /tmp/changed.txt || : > /tmp/changed.txt
+          stats=$(gh api "repos/$UPSTREAM/compare/$ours...$theirs" \
+                  --jq '"\(.total_commits) commits, \(.files | length) files"')
+
+          {
+            echo "Upstream's latest stable release is \`$theirs\`; this fork ships \`$ours\`."
+            echo
+            echo "Difference: **$stats**."
+            echo
+            echo "## Our patches on upstream files"
+            echo
+            echo "These are the only files this fork changes outside its own additions."
+            echo "A tick means upstream also changed it, so the patch has to be re-applied by hand:"
+            echo
+            for f in Cli/Commands/StatusCommand.php Core/Module/ModuleMigrator.php \
+                     Public/Views/admin/topbar.php migrations/002_add_maxmind_cron.sql \
+                     migrations/008_add_module_updates_cron.sql \
+                     migrations/009_add_proxy_cron.sql service; do
+              if grep -qxF "src/$f" /tmp/changed.txt; then
+                echo "- [ ] \`$f\` — **upstream changed this too**"
+              else
+                echo "- [x] \`$f\` — applies cleanly"
+              fi
+            done
+            echo
+            echo "Everything else we add lives in \`Modules/flussonic_1f4a9/\`, \`build/\`"
+            echo "and \`.github/\`, which upstream never touches."
+            echo
+            echo "## Do not use the panel's Update button"
+            echo
+            echo "It pulls from \`$UPSTREAM\` and \`cp -a\` over the tree, reverting every"
+            echo "patch above. Re-sync the fork and publish a release from here instead."
+            echo
+            echo "See \`build/README.md\` for the procedure."
+          } > /tmp/body.md
+
+          gh issue create --title "$title" --body-file /tmp/body.md
+          cat /tmp/body.md >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,171 @@
+name: Build Release
+
+# Builds the installable panel archives and attaches them to a GitHub release.
+#
+# The heavy lifting is in build/build-release.sh: it downloads the upstream
+# release matching XC_VM_VERSION as the base layer (bin/, config/, storage/ —
+# ~180 MB this repository deliberately does not carry), overlays this repo's
+# tracked files, and packs xc_vm.tar.gz + XC_VM.zip + hashes.md5.
+#
+# Trigger it by pushing a tag:
+#
+#   git tag v2.3.9-flussonic.1 && git push origin v2.3.9-flussonic.1
+#
+# or from the Actions tab (Run workflow), which also lets you build from a
+# branch without tagging.
+
+on:
+  push:
+    tags:
+      # v2.3.9-flussonic.N here; the public fork tags plain versions, because
+      # the in-panel updater compares tags with PHP's version_compare and a
+      # text suffix would sort *below* the version it is meant to supersede.
+      - 'v*'
+      - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to create or update (e.g. v2.3.9-flussonic.1)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark the release as a pre-release'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build installable archives
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve tag
+        id: meta
+        run: echo "tag=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      # Full history: the binary layer (bin/, ~700 MB) lives on the default
+      # branch, so the build needs that ref too, not just the tagged commit.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Two shapes of repository build with this workflow. The private working
+      # repo commits bin/ (677 MB) and uses it directly. The public fork keeps
+      # only source, and takes a whole deploy tree from a release archive --
+      # its own mirror first, upstream as the fallback -- which is what lets it
+      # stay small enough to push.
+      - name: Resolve the base layer
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(sed -nE "s/.*define\('XC_VM_VERSION', *'([^']+)'\).*/\1/p" \
+                    Core/Config/AppConfig.php | head -1)
+          echo "panel version $version"
+
+          if git cat-file -e HEAD:bin/php/bin/php 2>/dev/null; then
+            echo "args=--bin-ref HEAD" >> "$GITHUB_OUTPUT"
+            echo "bin/ is committed here"; exit 0
+          fi
+          if git rev-parse --verify origin/main >/dev/null 2>&1 \
+             || git fetch -q --depth=1 origin main:refs/remotes/origin/main 2>/dev/null; then
+            if git cat-file -e origin/main:bin/php/bin/php 2>/dev/null; then
+              echo "args=--bin-ref origin/main" >> "$GITHUB_OUTPUT"
+              echo "bin/ is on origin/main"; exit 0
+            fi
+          fi
+
+          for src in "$GITHUB_REPOSITORY base-$version" "Vateron-Media/XC_VM $version"; do
+            set -- $src
+            echo "trying $1 @ $2"
+            if gh release download "$2" --repo "$1" --pattern 'xc_vm.tar.gz' \
+                 --dir "$RUNNER_TEMP" 2>/dev/null; then
+              echo "args=--base-tar $RUNNER_TEMP/xc_vm.tar.gz" >> "$GITHUB_OUTPUT"
+              echo "base archive from $1 @ $2"
+              ls -la "$RUNNER_TEMP/xc_vm.tar.gz"; exit 0
+            fi
+          done
+
+          echo "::error::no base layer: no committed bin/, and no xc_vm.tar.gz in $GITHUB_REPOSITORY base-$version or Vateron-Media/XC_VM $version"
+          exit 1
+
+      # Scoped to what this repository changes on top of upstream. Linting the
+      # whole tree would only re-test upstream's own CI, and a false positive
+      # from a newer PHP than the bundled 8.1 would block the release.
+      - name: Lint changed PHP sources
+        run: |
+          php -v
+          fail=0
+          while IFS= read -r f; do
+            php -l "$f" > /dev/null || { echo "SYNTAX ERROR: $f"; fail=1; }
+          done < <(git diff --name-only 5fa97380b9169247f11583c6d1fd208d1b2a46a0...HEAD -- '*.php' \
+                    | grep -v '^vendor/' | while read -r f; do [ -f "$f" ] && echo "$f"; done)
+          exit $fail
+
+      # compile(), not ast.parse(): the latter accepts symbol-table errors like
+      # a `global` declared after the name was assigned in the same scope, which
+      # then only surfaces when someone runs the installer on their server.
+      - name: Compile the bundled python tools
+        run: |
+          python3 --version
+          fail=0
+          for tool in install uninstall repair-database doctor; do
+            [ -f "build/$tool" ] || continue
+            if python3 -c "import sys; compile(open(sys.argv[1], encoding='utf-8').read(), sys.argv[1], 'exec')" "build/$tool"; then
+              echo "OK       build/$tool"
+            else
+              echo "FAILED   build/$tool"; fail=1
+            fi
+          done
+          exit $fail
+
+      - name: Build archives
+        run: build/build-release.sh ${{ steps.base.outputs.args }} --out dist
+
+      # The checksums go into the release body itself, so what was published can
+      # be verified from the release page (and the API) without downloading it.
+      - name: Compose release notes
+        run: |
+          cp .github/release-notes.md release-body.md
+          {
+            echo
+            echo '## Assets'
+            echo
+            echo '| File | Size | MD5 |'
+            echo '| --- | ---: | --- |'
+            while read -r md5 name; do
+              printf '| `%s` | %s | `%s` |\n' \
+                "$name" "$(numfmt --to=iec --suffix=B "$(stat -c%s "dist/$name")")" "$md5"
+            done < dist/hashes.md5
+            echo
+            printf 'Built from `%s` by [run %s](%s/%s/actions/runs/%s).\n' \
+              "$(git rev-parse --short HEAD)" "$GITHUB_RUN_ID" \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+          } >> release-body.md
+          cat release-body.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          PRERELEASE: ${{ github.event.inputs.prerelease || 'true' }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" --title "XC_VM $TAG" --notes-file release-body.md
+          else
+            flags=""
+            [ "$PRERELEASE" = "true" ] && flags="--prerelease"
+            # shellcheck disable=SC2086
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "XC_VM $TAG" \
+              --notes-file release-body.md \
+              $flags
+          fi
+          gh release upload "$TAG" dist/XC_VM.zip dist/xc_vm.tar.gz dist/hashes.md5 --clobber

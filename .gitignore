@@ -1,0 +1,12 @@
+# Release build output
+dist/
+
+# Runtime state captured from a live panel — never belongs in the repository
+backup_*.sql
+tmp/cidr/
+tmp/cache/
+tmp/crons/
+tmp/logs/
+tmp/crontab
+tmp/*.log
+tmp/logs/

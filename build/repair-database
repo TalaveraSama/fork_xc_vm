@@ -1,0 +1,325 @@
+#!/usr/bin/python3
+"""
+Finish an XC_VM install whose database step failed.
+
+`install` sets up MariaDB assuming it can reach root without a password
+(the unix_socket default on a fresh Debian/Ubuntu). On a server where root
+already has a password — a box that ran a panel before — every DB step fails
+with `ERROR 1045 Access denied`, and the installer still prints
+"INSTALLATION COMPLETED SUCCESSFULLY". The panel then loops on:
+
+    {"error":"MySQL: SQLSTATE[HY000] [1045] Access denied for user '...'"}
+
+The panel tree itself is fine in that case. Only the MariaDB side is missing,
+and the credentials it expects are already written to config.ini, so this
+creates exactly what `install` would have:
+
+  - databases xc_vm and xc_vm_migrate
+  - the schema from bin/install/database.sql
+  - the panel's DB account, for both localhost and 127.0.0.1, with grants
+
+    sudo python3 repair-database --dry-run
+    sudo python3 repair-database
+    sudo python3 repair-database --mysql-root-password 'secret'
+
+Re-running it is safe: every step is idempotent and the schema is only
+imported into an empty database unless --force-schema is given.
+"""
+
+import argparse
+import getpass
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+HOME = "/home/xc_vm"
+CONFIG_INI = HOME + "/config/config.ini"
+CREDS = "/root/credentials.txt"
+SCHEMA = HOME + "/bin/install/database.sql"
+DATABASES = ["xc_vm", "xc_vm_migrate"]
+
+
+class col:
+    OK = "\033[92m"
+    INFO = "\033[94m"
+    WARN = "\033[93m"
+    FAIL = "\033[91m"
+    BOLD = "\033[1m"
+    END = "\033[0m"
+
+
+def say(msg, c=col.INFO):
+    print(c + msg + col.END)
+
+
+def step(msg):
+    print("\n" + col.BOLD + "==> " + msg + col.END)
+
+
+ARGS = None
+
+
+def q(s):
+    return "'" + str(s).replace("'", "'\\''") + "'"
+
+
+def sh(cmd, capture=True):
+    p = subprocess.run(cmd, shell=True, capture_output=capture, text=True)
+    return p.returncode, (p.stdout or ""), (p.stderr or "")
+
+
+# ─────────────────────────────────────────────────────────────────
+# Where the panel expects to connect
+# ─────────────────────────────────────────────────────────────────
+
+def panel_credentials():
+    """The account the panel will use. config.ini is authoritative — PHP reads
+    it and re-encrypts into config.enc — with credentials.txt as a fallback for
+    installs where the ini was already consumed."""
+    creds = {"database": "xc_vm", "host": "127.0.0.1", "port": "3306"}
+
+    if os.path.exists(CONFIG_INI):
+        try:
+            with open(CONFIG_INI, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+            for key in ("hostname", "database", "port", "username", "password"):
+                m = re.search(r'^\s*%s\s*=\s*"?([^"\n;]+)"?\s*$' % key, text, re.M)
+                if m:
+                    value = m.group(1).strip()
+                    creds["host" if key == "hostname" else key] = value
+            creds["source"] = CONFIG_INI
+        except OSError:
+            pass
+
+    if "username" not in creds and os.path.exists(CREDS):
+        try:
+            with open(CREDS, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+            m = re.search(r"^XC_VM Username:\s*(.+)$", text, re.M)
+            if m:
+                creds["username"] = m.group(1).strip()
+            m = re.search(r"^XC_VM Password:\s*(.+)$", text, re.M)
+            if m:
+                creds["password"] = m.group(1).strip()
+            m = re.search(r"^Database:\s*(.+)$", text, re.M)
+            if m:
+                creds["database"] = m.group(1).strip()
+            creds["source"] = CREDS
+        except OSError:
+            pass
+
+    return creds
+
+
+def saved_root_password():
+    if not os.path.exists(CREDS):
+        return None
+    try:
+        with open(CREDS, "r", encoding="utf-8", errors="replace") as f:
+            m = re.search(r"^Password:\s*(.+)$", f.read(), re.M)
+        return m.group(1).strip() if m else None
+    except OSError:
+        return None
+
+
+# ─────────────────────────────────────────────────────────────────
+# Administrative access to MariaDB
+# ─────────────────────────────────────────────────────────────────
+
+def admin_connection():
+    """Return a working `mariadb -u root ...` prefix, or None.
+
+    Socket auth first, then the password install saved, then whatever was
+    passed on the command line, then a prompt.
+    """
+    client = shutil.which("mariadb") or shutil.which("mysql")
+    if not client:
+        say("No mariadb/mysql client found — is MariaDB installed?", col.FAIL)
+        return None
+
+    def works(prefix):
+        rc, _, _ = sh(prefix + " -N -B -e 'SELECT 1' 2>/dev/null")
+        return rc == 0
+
+    candidates = [(client + " -u root", "socket authentication")]
+    if ARGS.mysql_root_password:
+        candidates.append(
+            (client + " -u root -p" + q(ARGS.mysql_root_password), "--mysql-root-password")
+        )
+    saved = saved_root_password()
+    if saved:
+        candidates.append((client + " -u root -p" + q(saved), CREDS))
+
+    for prefix, how in candidates:
+        if works(prefix):
+            say("    connected to MariaDB via %s" % how, col.OK)
+            return prefix
+
+    if ARGS.dry_run:
+        say("    cannot reach MariaDB as root (would prompt for the password)", col.WARN)
+        return None
+
+    say("    MariaDB rejected socket auth and the saved password.", col.WARN)
+    print("    This is normal on a server that ran a panel before: root already")
+    print("    has its own password. Enter it, or press Enter to give up.")
+    try:
+        pw = getpass.getpass("    MariaDB root password: ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+    if not pw:
+        return None
+    prefix = client + " -u root -p" + q(pw)
+    if works(prefix):
+        say("    connected", col.OK)
+        return prefix
+    say("    that password was not accepted either", col.FAIL)
+    return None
+
+
+def sql(admin, statement, db=None):
+    cmd = "%s %s-N -B -e %s" % (admin, (db + " ") if db else "", q(statement))
+    if ARGS.dry_run:
+        print("    [dry-run] " + statement)
+        return 0, "", ""
+    rc, out, err = sh(cmd)
+    if rc != 0:
+        say("    SQL failed: %s" % statement, col.FAIL)
+        if err.strip():
+            say("      " + err.strip().splitlines()[0], col.FAIL)
+    return rc, out, err
+
+
+# ─────────────────────────────────────────────────────────────────
+
+def main():
+    global ARGS
+    ap = argparse.ArgumentParser(
+        prog="repair-database",
+        description="Create the XC_VM databases, schema and user that a failed install skipped.",
+    )
+    ap.add_argument("--mysql-root-password", help="MariaDB root password (otherwise auto-detected or prompted)")
+    ap.add_argument("--dry-run", action="store_true", help="show what would happen, change nothing")
+    ap.add_argument("--force-schema", action="store_true", help="import the schema even if the database has tables")
+    ARGS = ap.parse_args()
+
+    if os.geteuid() != 0 and not ARGS.dry_run:
+        say("Run this as root:  sudo python3 repair-database", col.FAIL)
+        return 1
+
+    print(col.BOLD + "\nXC_VM database repair" + col.END)
+    if ARGS.dry_run:
+        say("Dry run — nothing will be changed.", col.WARN)
+
+    if not os.path.isdir(HOME):
+        say("\n%s does not exist — install the panel first." % HOME, col.FAIL)
+        return 1
+
+    step("Reading the credentials the panel expects")
+    creds = panel_credentials()
+    if not creds.get("username") or not creds.get("password"):
+        say("Could not find the panel's DB credentials.", col.FAIL)
+        print("    Looked in %s and %s." % (CONFIG_INI, CREDS))
+        print("    Without them this cannot recreate the account the panel uses.")
+        return 1
+    print("    source     %s" % creds.get("source", "?"))
+    print("    database   %s" % creds["database"])
+    print("    user       %s" % creds["username"])
+    print("    host       %s" % creds.get("host", "127.0.0.1"))
+
+    step("Connecting to MariaDB as an administrator")
+    admin = admin_connection()
+    if not admin:
+        say("\nCannot continue without administrative access to MariaDB.", col.FAIL)
+        print("    If you know the root password:")
+        print("        sudo python3 repair-database --mysql-root-password 'yourpassword'")
+        print("    If nobody knows it, reset it with MariaDB stopped:")
+        print("        sudo systemctl stop mariadb")
+        print("        sudo mariadbd-safe --skip-grant-tables --skip-networking &")
+        print("        sudo mariadb -u root")
+        print("        > FLUSH PRIVILEGES;")
+        print("        > ALTER USER 'root'@'localhost' IDENTIFIED VIA unix_socket;")
+        return 1
+
+    step("Creating the databases")
+    for db in DATABASES:
+        sql(admin, "CREATE DATABASE IF NOT EXISTS `%s`;" % db)
+        say("    %s" % db, col.OK)
+
+    step("Importing the schema")
+    target = creds["database"]
+    rc, out, _ = sql(admin, "SELECT COUNT(*) FROM information_schema.tables "
+                            "WHERE table_schema = '%s';" % target)
+    tables = 0
+    try:
+        tables = int((out or "0").strip() or 0)
+    except ValueError:
+        pass
+
+    if not os.path.exists(SCHEMA):
+        say("    %s is missing — cannot import" % SCHEMA, col.FAIL)
+    elif tables > 0 and not ARGS.force_schema:
+        say("    %s already has %d tables — leaving it alone (--force-schema to override)"
+            % (target, tables), col.WARN)
+    elif ARGS.dry_run:
+        print("    [dry-run] import %s into %s" % (SCHEMA, target))
+    else:
+        rc, _, err = sh("%s %s < %s" % (admin, target, q(SCHEMA)))
+        if rc == 0:
+            rc2, out2, _ = sql(admin, "SELECT COUNT(*) FROM information_schema.tables "
+                                      "WHERE table_schema = '%s';" % target)
+            say("    imported — %s now has %s tables" % (target, (out2 or "?").strip()), col.OK)
+        else:
+            say("    import failed: %s" % (err.strip().splitlines() or ["?"])[0], col.FAIL)
+            return 1
+
+    step("Creating the panel's database account")
+    user, pw = creds["username"], creds["password"]
+    for host in ("localhost", "127.0.0.1"):
+        sql(admin, "CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s';" % (user, host, pw))
+        # An account left over from a previous attempt may carry a stale
+        # password, so set it explicitly rather than trusting CREATE IF NOT EXISTS.
+        sql(admin, "ALTER USER '%s'@'%s' IDENTIFIED BY '%s';" % (user, host, pw))
+        for db in DATABASES:
+            sql(admin, "GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'%s';" % (db, user, host))
+        sql(admin, "GRANT ALL PRIVILEGES ON `mysql`.* TO '%s'@'%s';" % (user, host))
+        sql(admin, "GRANT GRANT OPTION ON `xc_vm`.* TO '%s'@'%s';" % (user, host))
+        say("    %s@%s" % (user, host), col.OK)
+    sql(admin, "FLUSH PRIVILEGES;")
+
+    step("Verifying the panel can connect")
+    if ARGS.dry_run:
+        print("    [dry-run] connect as %s@127.0.0.1" % user)
+    else:
+        client = shutil.which("mariadb") or shutil.which("mysql")
+        rc, _, err = sh("%s -h 127.0.0.1 -u %s -p%s -N -B -e 'SELECT COUNT(*) FROM %s.streams' 2>&1"
+                        % (client, q(user), q(pw), creds["database"]))
+        if rc == 0:
+            say("    the panel's account works", col.OK)
+        else:
+            say("    still failing: %s" % ((err or "").strip().splitlines() or ["?"])[0], col.FAIL)
+            print("    Check that config.ini and MariaDB agree on the password.")
+            return 1
+
+    step("Restarting the panel")
+    if ARGS.dry_run:
+        print("    [dry-run] systemctl restart xc_vm")
+    else:
+        sh("systemctl restart xc_vm", capture=False)
+        say("    restarted", col.OK)
+
+    print()
+    say("Done. Open the panel's setup URL again.", col.OK)
+    print("    If it still errors, check:  journalctl -u xc_vm -n 50")
+    print()
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print()
+        sys.exit(130)

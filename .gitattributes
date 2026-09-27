@@ -1,0 +1,8 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Vendored upstream runtime configs: keep them byte-identical to the release
+# they were taken from. `* text=auto` above would rewrite CRLF to LF.
+build/templates/bin/nginx/conf/**      -text
+build/templates/bin/nginx_rtmp/conf/** -text
+build/templates/bin/redis/redis.conf   -text
