@@ -114,12 +114,12 @@ jobs:
             gh release create "$TAG" \
               --title "Base deploy tree $VERSION" \
               --notes "Upstream's \`xc_vm.tar.gz\` for $VERSION, mirrored unmodified from
-[\`$UPSTREAM\`](https://github.com/$UPSTREAM/releases/tag/$VERSION) and verified
-against its \`hashes.md5\`.
+          [\`$UPSTREAM\`](https://github.com/$UPSTREAM/releases/tag/$VERSION) and verified
+          against its \`hashes.md5\`.
 
-Used as the base layer by \`build-release.yml\`, so building a release here does
-not depend on upstream staying reachable. Not a panel release -- see the
-version-tagged ones for those." \
+          Used as the base layer by \`build-release.yml\`, so building a release here does
+          not depend on upstream staying reachable. Not a panel release -- see the
+          version-tagged ones for those." \
               --prerelease
           fi
           gh release upload "$TAG" dl/* --clobber

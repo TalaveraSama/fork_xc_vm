@@ -139,7 +139,7 @@ jobs:
               --title "XC_VM binaries $TAG" \
               --notes "Mirror of [\`$UPSTREAM\` $TAG](https://github.com/$UPSTREAM/releases/tag/$TAG), verified against its \`hashes.md5\`.
 
-Published here so panel installs do not depend on the upstream repository. Contents are unmodified." \
+          Published here so panel installs do not depend on the upstream repository. Contents are unmodified." \
               --prerelease
           fi
           gh release upload "$MIRROR_TAG" dl/* --clobber
