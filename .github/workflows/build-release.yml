@@ -33,6 +33,11 @@ on:
         required: false
         default: true
         type: boolean
+      allow_upstream_base:
+        description: 'Allow falling back to Vateron-Media for the base layer'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -63,6 +68,9 @@ jobs:
         id: base
         env:
           GH_TOKEN: ${{ github.token }}
+          # Empty on a tag push, which is deliberate: an unattended release is
+          # a self-contained one or it is no release at all.
+          ALLOW_UPSTREAM: ${{ github.event.inputs.allow_upstream_base || 'false' }}
         run: |
           set -euo pipefail
           version=$(sed -nE "s/.*define\('XC_VM_VERSION', *'([^']+)'\).*/\1/p" \
@@ -71,28 +79,47 @@ jobs:
 
           if git cat-file -e HEAD:bin/php/bin/php 2>/dev/null; then
             echo "args=--bin-ref HEAD" >> "$GITHUB_OUTPUT"
+            echo "origin=this repository @ HEAD (committed bin/)" >> "$GITHUB_OUTPUT"
             echo "bin/ is committed here"; exit 0
           fi
           if git rev-parse --verify origin/main >/dev/null 2>&1 \
              || git fetch -q --depth=1 origin main:refs/remotes/origin/main 2>/dev/null; then
             if git cat-file -e origin/main:bin/php/bin/php 2>/dev/null; then
               echo "args=--bin-ref origin/main" >> "$GITHUB_OUTPUT"
+              echo "origin=this repository @ origin/main (committed bin/)" >> "$GITHUB_OUTPUT"
               echo "bin/ is on origin/main"; exit 0
             fi
           fi
 
-          for src in "$GITHUB_REPOSITORY base-$version" "Vateron-Media/XC_VM $version"; do
-            set -- $src
-            echo "trying $1 @ $2"
-            if gh release download "$2" --repo "$1" --pattern 'xc_vm.tar.gz' \
-                 --dir "$RUNNER_TEMP" 2>/dev/null; then
-              echo "args=--base-tar $RUNNER_TEMP/xc_vm.tar.gz" >> "$GITHUB_OUTPUT"
-              echo "base archive from $1 @ $2"
-              ls -la "$RUNNER_TEMP/xc_vm.tar.gz"; exit 0
-            fi
-          done
+          # This fork's own mirror first. Upstream is NOT tried unless asked
+          # for: a release whose runtime layer came from Vateron-Media is a
+          # release that still depends on them, and the old order fell through
+          # to upstream silently, so nothing on the release page said so.
+          if gh release download "base-$version" --repo "$GITHUB_REPOSITORY" \
+               --pattern 'xc_vm.tar.gz' --dir "$RUNNER_TEMP" 2>/dev/null; then
+            echo "args=--base-tar $RUNNER_TEMP/xc_vm.tar.gz" >> "$GITHUB_OUTPUT"
+            echo "origin=$GITHUB_REPOSITORY @ base-$version" >> "$GITHUB_OUTPUT"
+            echo "base archive from this fork: base-$version"
+            ls -la "$RUNNER_TEMP/xc_vm.tar.gz"; exit 0
+          fi
 
-          echo "::error::no base layer: no committed bin/, and no xc_vm.tar.gz in $GITHUB_REPOSITORY base-$version or Vateron-Media/XC_VM $version"
+          if [ "$ALLOW_UPSTREAM" != "true" ]; then
+            echo "::error::no base layer in $GITHUB_REPOSITORY (release base-$version with xc_vm.tar.gz)."
+            echo "::error::Run 'Mirror upstream base archive' once to seed it. That is what makes"
+            echo "::error::this fork self-contained. To build from Vateron-Media anyway, re-run with"
+            echo "::error::allow_upstream_base = true -- the release notes will record it."
+            exit 1
+          fi
+
+          echo "::warning::falling back to Vateron-Media/XC_VM @ $version -- this release is not self-contained"
+          if gh release download "$version" --repo Vateron-Media/XC_VM \
+               --pattern 'xc_vm.tar.gz' --dir "$RUNNER_TEMP" 2>/dev/null; then
+            echo "args=--base-tar $RUNNER_TEMP/xc_vm.tar.gz" >> "$GITHUB_OUTPUT"
+            echo "origin=Vateron-Media/XC_VM @ $version (upstream)" >> "$GITHUB_OUTPUT"
+            ls -la "$RUNNER_TEMP/xc_vm.tar.gz"; exit 0
+          fi
+
+          echo "::error::no base layer: no committed bin/, no xc_vm.tar.gz in $GITHUB_REPOSITORY base-$version, and none upstream at $version"
           exit 1
 
       # Scoped to what this fork changes on top of upstream -- the manifest in
@@ -185,6 +212,8 @@ jobs:
       # The checksums go into the release body itself, so what was published can
       # be verified from the release page (and the API) without downloading it.
       - name: Compose release notes
+        env:
+          BASE_ORIGIN: ${{ steps.base.outputs.origin }}
         run: |
           cp .github/release-notes.md release-body.md
           {
@@ -197,6 +226,22 @@ jobs:
               printf '| `%s` | %s | `%s` |\n' \
                 "$name" "$(numfmt --to=iec --suffix=B "$(stat -c%s "dist/$name")")" "$md5"
             done < dist/hashes.md5
+            echo
+            echo '## Provenance'
+            echo
+            printf 'Runtime base layer: `%s`.\n' "$BASE_ORIGIN"
+            case "$BASE_ORIGIN" in
+              *upstream*)
+                echo
+                echo '> This build fell back to Vateron-Media for its runtime layer,'
+                echo '> so it is **not** self-contained. Run *Mirror upstream base'
+                echo '> archive* and rebuild to cut that dependency.'
+                ;;
+              *)
+                echo
+                echo 'Nothing was taken from `Vateron-Media/XC_VM` to produce this release.'
+                ;;
+            esac
             echo
             printf 'Built from `%s` by [run %s](%s/%s/actions/runs/%s).\n' \
               "$(git rev-parse --short HEAD)" "$GITHUB_RUN_ID" \

@@ -94,6 +94,16 @@ of the same release rather than a fixed owner, and skips the `binaries-` and
 Note the installer prefers a local `xc_vm.tar.gz` / `XC_VM.zip` before any
 network call, so installing from a ZIP built here never touches GitHub at all.
 
+**The build refuses to depend on upstream.** `build-release.yml` resolves its
+runtime layer from this fork's own `base-<version>` mirror and, if that is
+missing, **fails** with instructions instead of quietly reaching for
+Vateron-Media. Falling back is now an explicit choice: the
+`allow_upstream_base` input, `false` by default and empty on a tag push, so an
+unattended release is self-contained or it is not a release at all. Whichever
+happens, the chosen base is written into the release body under *Provenance* —
+either "Nothing was taken from `Vateron-Media/XC_VM` to produce this release"
+or a blockquote saying the opposite. All four paths were simulated.
+
 **Still upstream, by the original design decision — data, not panel code:**
 
 | Piece | Source | When |
@@ -104,9 +114,27 @@ network call, so installing from a ZIP built here never touches GitHub at all.
 Both run through the panel's own cron commands at the end of `install`, and
 both are **non-fatal** — `run_command` never raises, so if those repositories
 vanished the install would still complete, just without GeoIP and without a
-local proxy-node archive. Mirroring them would take a third workflow shaped
-like `mirror.yml` plus splitting `GIT_OWNER` the way `GIT_OWNER_MAIN` and
-`GIT_OWNER_BIN` already are.
+local proxy-node archive.
+
+Mirroring these two is **not** a matter of copying `mirror.yml`. Upstream tags
+them `25.09.26` and `1.0.0` as stable releases, and the panel's updater reads
+this repository through `GitHubReleases` with `version_compare`: a stable
+`25.09.26` sitting next to the panel's `2.3.9` would read as a newer panel and
+the Update button would try to install the GeoIP databases as the panel. That
+is why `binaries-` and `base-` are both prefixed *and* prereleases.
+
+Two ways out, neither free:
+
+- **Separate mirror repos** — `TalaveraSama/XC_VM_Update` and
+  `TalaveraSama/XC_VM_Proxy`, keeping upstream's tags and stable flags
+  untouched. Then only `AppConfig.php` gains `GIT_OWNER_UPDATE` /
+  `GIT_OWNER_PROXY` and four call sites change. Cleanest, but a session token
+  cannot create repositories — the user has to make the two empty repos first.
+- **Prefixed prereleases in this repo** — `geoip-<tag>`, `proxy-<tag>`. No new
+  repos, but `MaxMindCronJob`, `ProxyArchiveCronJob`, `ProxyArchiveUpdater`
+  and `ServerInstallCommand` all have to stop trusting the stable channel and
+  learn the prefixes, taking the patched-file count from 15 to 19 — on a fork
+  where 12 of 15 already collide with 2.5.3.
 
 Everything else naming Vateron-Media is inert: copyright headers, a curl
 User-Agent string in `GitHubReleases.php`, and the `repository` metadata of
