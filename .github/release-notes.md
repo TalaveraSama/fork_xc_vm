@@ -15,10 +15,7 @@ The installer uses the `xc_vm.tar.gz` sitting next to it, so it deploys **this**
 tree — not upstream's. Requirements are unchanged: a clean Ubuntu 22.04+ or
 Debian 12 host, installed to `/home/xc_vm`.
 
-The archive bundles the full runtime — the PHP 8.1 build with `xcvm_core.so`
-and the ionCube loader, nginx, nginx-rtmp, redis, ffmpeg 4.0/7.1/8.0, yt-dlp
-and the MaxMind databases — so the install still completes if
-`XC_VM_Binaries` is unreachable. That is why it is larger than upstream's.
+@@RUNTIME@@
 
 Already running a panel? Use `xc_vm.tar.gz` with the in-panel updater instead of
 reinstalling.

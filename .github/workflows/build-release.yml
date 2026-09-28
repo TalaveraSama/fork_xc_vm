@@ -215,7 +215,39 @@ jobs:
         env:
           BASE_ORIGIN: ${{ steps.base.outputs.origin }}
         run: |
-          cp .github/release-notes.md release-body.md
+          # What the archive carries is a property of the build, not of the
+          # template. It used to be asserted in prose - "bundles the full
+          # runtime ... so the install still completes if XC_VM_Binaries is
+          # unreachable" - which stopped being true the moment a build could
+          # start from upstream's base archive, whose bin/ is a skeleton. A
+          # release that overstates what is in it sends someone into an
+          # install that cannot finish.
+          if grep -q '^layer complete$' dist/runtime-inventory.txt; then
+            cat > runtime.md <<'EOF'
+          The archive bundles the full runtime — the PHP 8.1 build with `xcvm_core.so`
+          and the ionCube loader, nginx, nginx-rtmp, redis, ffmpeg and yt-dlp — so the
+          install completes even if the binaries mirror is unreachable.
+          EOF
+          else
+            {
+              echo 'The archive carries the panel and the shared data, and the'
+              echo 'distribution-specific runtime is downloaded during the install, the'
+              echo 'way upstream does it. These are fetched, not bundled:'
+              echo
+              sed -n 's|^absent |- `|p' dist/runtime-inventory.txt | sed 's|$|`|'
+              echo
+              echo 'They come from this repository’s own `binaries-*` release, not from'
+              echo '`Vateron-Media/XC_VM_Binaries`, so the install still depends on nothing'
+              echo 'upstream — but it does need network access to GitHub.'
+            } > runtime.md
+          fi
+          python3 - <<'PY'
+          import pathlib
+          body = pathlib.Path('.github/release-notes.md').read_text()
+          runtime = pathlib.Path('runtime.md').read_text().rstrip('\n')
+          assert '@@RUNTIME@@' in body, 'release-notes.md lost its @@RUNTIME@@ marker'
+          pathlib.Path('release-body.md').write_text(body.replace('@@RUNTIME@@', runtime))
+          PY
           {
             echo
             echo '## Assets'

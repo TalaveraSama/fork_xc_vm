@@ -404,16 +404,29 @@ done
 # supposed to be a complete one; absent by design from a base archive, where
 # the installer downloads it per distribution. Reported either way, so a build
 # never quietly ships less runtime than whoever reads the log expects.
+# Recorded, not just printed: the release notes describe what the archive
+# carries, and that description has to come from the archive rather than from
+# what someone assumed when writing the template.
+: > "$OUT_DIR/runtime-inventory.txt"
 for p in bin/php/bin/php bin/php/lib/php/extensions/no-debug-non-zts-20210902/xcvm_core.so \
          bin/nginx/sbin/nginx bin/nginx_rtmp/sbin/nginx_rtmp bin/redis/redis-server \
          bin/ffmpeg_bin/8.0/ffmpeg; do
-  if [ -e "$STAGE/$p" ]; then continue; fi
+  if [ -e "$STAGE/$p" ]; then
+    echo "present $p" >> "$OUT_DIR/runtime-inventory.txt"
+    continue
+  fi
+  echo "absent $p" >> "$OUT_DIR/runtime-inventory.txt"
   if [ "$BIN_LAYER" = base ]; then
     echo "   not in the base archive (installer fetches it): $p" >&2
   else
     echo "   MISSING: $p" >&2; fail=1
   fi
 done
+if grep -q '^absent ' "$OUT_DIR/runtime-inventory.txt"; then
+  echo "layer skeleton" >> "$OUT_DIR/runtime-inventory.txt"
+else
+  echo "layer complete" >> "$OUT_DIR/runtime-inventory.txt"
+fi
 
 # Nothing carrying a live panel's identity, credentials or data may ship.
 for leak in config.enc install_id signals.last backup_*.sql \
