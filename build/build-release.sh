@@ -129,27 +129,55 @@ else
   git archive "$BIN_REF" bin | tar -x -C "$STAGE"
 fi
 
+# How complete bin/ is allowed to be depends on where it came from.
+#
+# A captured bin/ (--bin-dir, --bin-ref) is a whole working runtime taken off
+# a panel, so php, nginx, redis and ffmpeg must all be in it.
+#
+# A base archive is upstream's own release tree, and upstream ships bin/ as a
+# skeleton: bin_version.json, the helper scripts, maxmind, and empty
+# directories where the interpreters go. The php/nginx/redis/ffmpeg builds are
+# distribution-specific and are fetched separately at install time by
+# install_distribution_binaries() in build/install, from the binaries mirror.
+# Demanding them here would reject every base archive there is -- including
+# the one upstream publishes for the very version being built.
+if [ -n "$BASE_TAR" ]; then BIN_LAYER=base; else BIN_LAYER=captured; fi
+
+if [ "$BIN_LAYER" = base ]; then
+  REQUIRED_IN_BIN="$STAGE/bin/bin_version.json"
+else
+  REQUIRED_IN_BIN="$STAGE/bin/php/bin/php"
+fi
+
 # "no bin/php/bin/php" on its own says nothing about what the layer DOES
 # contain, and on CI the run log is not always reachable, so describe the tree
 # instead of just rejecting it. ::error:: puts it in the run's annotations,
 # which survive even when the log download does not.
-if [ ! -e "$STAGE/bin/php/bin/php" ]; then
+if [ ! -e "$REQUIRED_IN_BIN" ]; then
   top=$(ls -A "$STAGE" 2>/dev/null | tr '\n' ' ')
   if [ -d "$STAGE/bin" ]; then
     inbin=$(ls -A "$STAGE/bin" 2>/dev/null | tr '\n' ' ')
   else
     inbin="(no bin/ directory at all)"
   fi
-  echo "build-release: binary layer has no bin/php/bin/php" >&2
+  missing=${REQUIRED_IN_BIN#"$STAGE/"}
+  echo "build-release: $BIN_LAYER binary layer has no $missing" >&2
   echo "  staged top level: $top" >&2
   echo "  staged bin/:      $inbin" >&2
   if [ -n "${GITHUB_ACTIONS:-}" ]; then
-    echo "::error::binary layer has no bin/php/bin/php -- top level: ${top:0:300}"
+    echo "::error::$BIN_LAYER binary layer has no $missing -- top level: ${top:0:300}"
     echo "::error::binary layer bin/ contains: ${inbin:0:300}"
   fi
   exit 1
 fi
-say "Binary layer: $(find "$STAGE/bin" -type f | wc -l) files, $(du -sh "$STAGE/bin" | cut -f1)"
+say "Binary layer ($BIN_LAYER): $(find "$STAGE/bin" -type f | wc -l) files, $(du -sh "$STAGE/bin" | cut -f1)"
+
+# What actually shipped in bin/, one line per entry. Worth the four lines: the
+# difference between a complete runtime and upstream's skeleton is invisible
+# in a total, and it decides whether the installer has work left to do.
+while IFS= read -r entry; do
+  printf '    %-24s %s\n' "$(basename "$entry")" "$(du -sh "$entry" 2>/dev/null | cut -f1)"
+done < <(find "$STAGE/bin" -mindepth 1 -maxdepth 1 | sort)
 
 # ── 1b. Template layer ───────────────────────────────────────────
 # The binary layer is captured from a running panel, so its text configs are
@@ -365,12 +393,26 @@ if [ -n "$pointers" ]; then
 fi
 
 fail=0
+
+# Everything the release must carry itself, whatever the binary layer was.
 for p in bootstrap.php console.php service update uninstall repair-database doctor Core Public Modules vendor \
-         config/modules.php config/permissions.php \
-         bin/php/bin/php bin/php/lib/php/extensions/no-debug-non-zts-20210902/xcvm_core.so \
-         bin/nginx/sbin/nginx bin/nginx_rtmp/sbin/nginx_rtmp bin/redis/redis-server \
-         bin/ffmpeg_bin/8.0/ffmpeg bin/install/database.sql; do
+         config/modules.php config/permissions.php bin/install/database.sql; do
   [ -e "$STAGE/$p" ] || { echo "   MISSING: $p" >&2; fail=1; }
+done
+
+# The distribution-specific runtime. Required from a captured bin/, which is
+# supposed to be a complete one; absent by design from a base archive, where
+# the installer downloads it per distribution. Reported either way, so a build
+# never quietly ships less runtime than whoever reads the log expects.
+for p in bin/php/bin/php bin/php/lib/php/extensions/no-debug-non-zts-20210902/xcvm_core.so \
+         bin/nginx/sbin/nginx bin/nginx_rtmp/sbin/nginx_rtmp bin/redis/redis-server \
+         bin/ffmpeg_bin/8.0/ffmpeg; do
+  if [ -e "$STAGE/$p" ]; then continue; fi
+  if [ "$BIN_LAYER" = base ]; then
+    echo "   not in the base archive (installer fetches it): $p" >&2
+  else
+    echo "   MISSING: $p" >&2; fail=1
+  fi
 done
 
 # Nothing carrying a live panel's identity, credentials or data may ship.
