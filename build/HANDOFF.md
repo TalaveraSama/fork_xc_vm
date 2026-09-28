@@ -435,6 +435,45 @@ repository called `XC_VM_Update` shared one cache file, so `locate()` could hand
 back one owner's tag list while the download URLs were built from another's.
 The key now includes the owner.
 
+### Lines downloaded their playlist and played nothing
+
+Reported from the field right after the 404 above: the client authenticates,
+pulls its M3U, and no channel plays. The panel's own preview player works, so
+the streams themselves are fine.
+
+One call explains it. `Public/stream/auth.php` resolves the client country on
+**every** playback request:
+
+    $rCountryCode = GeoIPService::getIPInfo($rIP);
+
+`getIPInfo()` did `new \MaxMind\Db\Reader(GEOLITE2_BIN)` with no `is_file()`
+guard and no `try`. When `bin/maxmind/GeoLite2-Country.mmdb` is absent the
+constructor throws, `auth.php` runs with `display_errors` off, and the client
+gets nothing. The playlist endpoints -- `Public/index.php`,
+`PlayerApiController`, `StreamingBootstrap` -- never look up an IP, which is
+exactly why the list keeps working while playback is dead. A confusing symptom
+with a one-line cause.
+
+And the database is missing for a reason that is not the operator's fault.
+`build/install` downloads it post-install by calling `cron:maxmind --force`,
+deliberately non-fatally ("run_command never raises, so a download failure
+won't abort"). That cron was the one 404ing on the missing `XC_VM_Update`
+mirror. So the install completed, reported success, served playlists, and
+could not play a single channel.
+
+Two changes. `GeoIPService::read()` now checks the file exists, catches
+`\Throwable`, logs once per path and returns false -- GeoIP is enrichment, and
+an absent database should cost a country code, not the whole service. It also
+covers `getISP()`, which reads `GeoIP2-ISP.mmdb`: a **paid** database most
+installs never have, reached on the same unguarded path whenever `show_isps`
+is on. And the installer now checks for the file after the download and says
+so loudly if it is not there, instead of leaving a server that looks installed
+and plays nothing.
+
+Worth keeping in mind: with no country resolvable, a line whose `forced_country`
+is set to something other than `ALL` is still denied -- correctly, since the
+claim cannot be verified. Those lines need the database, not just the fix.
+
 ## Faults found in the fork's own CI
 
 Same rule: do not revert these. Every one was verified, not reasoned about.
@@ -502,7 +541,7 @@ it dead, and none was visible from reading the files.
   the substitution asserts it is there, so removing it fails the build rather
   than publishing notes with a hole.
 
-## This fork modifies nineteen upstream files
+## This fork modifies twenty upstream files
 
 Established by byte comparison against a clone of upstream 2.3.9, with the two
 corrections a naive diff needs:
@@ -515,10 +554,11 @@ corrections a naive diff needs:
   pointer. Our copy's sha256 matches the pointer's oid exactly: not patched.
 
 The list lives in `.github/patched-upstream-files.txt` and is the single
-source of truth for both workflows. It is **19 files**: 18 once the GeoIP and
+source of truth for both workflows. It is **20 files**: 18 once the GeoIP and
 proxy sources were redirected, plus `Core/Updates/GitHubReleases.php` when the
 binaries updater had to learn that this fork keeps the runtime in a
-`binaries-` prerelease. Re-measure with the byte comparison above rather than
+`binaries-` prerelease, plus `Core/GeoIP/GeoIPService.php` when a missing
+GeoLite2 database turned out to kill playback outright. Re-measure with the byte comparison above rather than
 trusting this number. The one that the original handoff missed is
 `resources/langs/en.ini`, which the previous handoff missed. It is **not a
 deliberate patch**: the panel appends missing language keys at runtime with

@@ -2873,6 +2873,13 @@ if __name__ == "__main__":
         run_command(
             f"/home/xc_vm/bin/php/bin/php {startup_cmd} cron:maxmind --force"
         )
+        # Say so if it did not land. Playback resolves the client country on
+        # every request, so an install that skips this looks complete, serves
+        # playlists, and plays nothing.
+        if not os.path.exists("/home/xc_vm/bin/maxmind/GeoLite2-Country.mmdb"):
+            printc("WARNING: GeoLite2 database not downloaded.", col.WARNING)
+            printc("Re-run once the server has network:", col.WARNING)
+            printc("  console.php cron:maxmind --force", col.WARNING)
 
     # Download the proxy-node archive (proxy.tar.gz). Like GeoLite2 it is no longer
     # bundled in the release archive — fetch it from the XC_VM_Proxy release on

@@ -36,6 +36,7 @@ Cli/Commands/BinariesCommand.php
 Cli/Commands/StatusCommand.php
 Cli/CronJobs/MaxMindCronJob.php
 Cli/CronJobs/ProxyArchiveCronJob.php
+Core/GeoIP/GeoIPService.php
 Core/Module/ModuleMigrator.php
 Core/Updates/GitHubReleases.php
 Public/Views/admin/topbar.php
