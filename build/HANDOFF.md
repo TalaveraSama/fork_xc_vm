@@ -1,7 +1,7 @@
 # Handoff
 
-XC_VM 2.4.0 with a Flussonic module, packaged as installable GitHub releases.
-2.4.0 is this fork's own number; the source layer it is built from is
+XC_VM 2.4.1 with a Flussonic module, packaged as installable GitHub releases.
+2.4.1 is this fork's own number; the source layer it is built from is
 upstream 2.3.9, which is still their newest stable.
 This is what a fresh session needs to carry on without relearning it.
 
@@ -48,15 +48,17 @@ no `bin/`, exactly what `build/publish-source-to-fork.sh` emits.
 
 **3. ~~Run the fork's workflows.~~ Done — the releases exist.**
 
+    2.4.1              XC_VM 2.4.1              stable       XC_VM.zip, xc_vm.tar.gz, hashes.md5
     2.4.0              XC_VM 2.4.0              stable       XC_VM.zip, xc_vm.tar.gz, hashes.md5
     2.3.9              XC_VM 2.3.9              stable       XC_VM.zip, xc_vm.tar.gz, hashes.md5
     binaries-29062026  XC_VM binaries 29062026  prerelease   6 distro tarballs + hashes.md5
+    base-2.4.1         Base deploy tree 2.4.1   prerelease   xc_vm.tar.gz, hashes.md5, upstream-tag.txt
     base-2.4.0         Base deploy tree 2.4.0   prerelease   xc_vm.tar.gz, hashes.md5, upstream-tag.txt
     base-2.3.9         Base deploy tree 2.3.9   prerelease   xc_vm.tar.gz, hashes.md5
 
-`2.4.0` is the newest stable, so it is what the panel's stable channel returns
-and what the Update button offers. Both base layers hold the same 174,180,187
-byte archive — upstream's 2.3.9 — because that is the tree this source is
+`2.4.1` is the newest stable, so it is what the panel's stable channel returns
+and what the Update button offers. All three base layers hold the same
+174,180,187 byte archive — upstream's 2.3.9 — because that is the tree this source is
 built from regardless of the number on the front.
 
 Verified installable on all six distributions after being rebuilt at 2.4.0:
@@ -137,7 +139,7 @@ it is built on are separate facts, and anything that needs the second must ask
 Migrations do not need a hand: `MigrationRunner` applies them by filename, not
 by version, so the bump adds no schema work. The binaries mirror is keyed on
 `binaries-<date>`, not on the version, so `binaries-29062026` still serves
-2.4.0 — only `base-2.4.0` has to be seeded.
+2.4.1 — only `base-2.4.1` has to be seeded.
 
 **Verified installable, mechanically.** `build/verify-release.py` downloads a
 published release, checks both archives against their published md5, opens
@@ -174,9 +176,9 @@ branch ran, and stops with the supported list if it is not.
 **How to cut the next release.** Three tags, in order; each is only a
 doorbell, the version itself still comes from `AppConfig.php`:
 
-    git tag seed-base-2.4.0 && git push origin seed-base-2.4.0   # base layer
+    git tag seed-base-2.4.1 && git push origin seed-base-2.4.1   # base layer
     git tag seed-binaries   && git push origin seed-binaries     # distro binaries
-    git tag 2.4.0           && git push origin 2.4.0             # the release
+    git tag 2.4.1           && git push origin 2.4.1             # the release
 
 The mirrors are idempotent: they skip when the tag is already mirrored, so
 re-running them costs nothing. `seed-*` deliberately does not match the
