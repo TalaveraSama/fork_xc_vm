@@ -355,6 +355,7 @@ def run(args, work):
         bad(f"{brel['tag_name']} has no .tar.gz assets")
         return
     wanted = stems if args.distro == "all" else [args.distro]
+    complete = []
 
     for stem in wanted:
         name = stem + ".tar.gz"
@@ -386,8 +387,18 @@ def run(args, work):
             bad(f"{stem}: after the install the tree would still be missing "
                 + ", ".join(still))
         else:
+            complete.append(stem)
             ok(f"{stem}: supplies all {len(missing)} missing component(s) — "
                f"a complete tree")
+
+    # The one line worth reading: which distributions this release installs
+    # cleanly on. Emitted as a notice so it survives into the run annotations,
+    # which are readable when the log is not.
+    if complete:
+        note("complete tree after install on: " + ", ".join(complete))
+    for stem in wanted:
+        if stem not in complete:
+            note(f"NOT verified complete: {stem}")
 
 
 if __name__ == "__main__":
