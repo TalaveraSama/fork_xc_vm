@@ -20,6 +20,19 @@ on:
         description: 'Panel version to mirror (blank = read from AppConfig.php)'
         required: false
         type: string
+  # A push-tag route to the same job, because `workflow_dispatch` needs either
+  # the Actions tab or a working `gh` -- and on Ubuntu 20.04 `gh` is often
+  # gitsome, an unrelated tool. Pushing a tag is something every git client
+  # can do:  git tag seed-base-2.3.9 && git push origin seed-base-2.3.9
+  #
+  # `seed-base*`, not `base-*`: this workflow publishes a release tagged
+  # `base-<version>`, and a trigger matching what the job creates would be a
+  # loop waiting for the day the release is made by something other than
+  # GITHUB_TOKEN. The tag is only a doorbell; the version still comes from
+  # AppConfig.php.
+  push:
+    tags:
+      - 'seed-base*'
   schedule:
     - cron: '30 4 * * 1'
 

@@ -24,6 +24,13 @@ on:
         required: false
         default: false
         type: boolean
+  # Same push-tag route as mirror-base.yml, for clients that cannot reach
+  # `workflow_dispatch`:  git tag seed-binaries && git push origin seed-binaries
+  # `seed-binaries*` never collides with the `binaries-<tag>` releases this
+  # job publishes, so it cannot retrigger itself.
+  push:
+    tags:
+      - 'seed-binaries*'
   schedule:
     # Monday 04:00 UTC — picks up new upstream binary builds on its own.
     - cron: '0 4 * * 1'

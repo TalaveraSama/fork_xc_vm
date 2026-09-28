@@ -53,9 +53,26 @@ see the first two entries under "Faults found in the fork's own CI" below.
 The Actions tab is the only way in: a session token scoped to this repo
 **cannot dispatch workflows** (`HTTP 403` on `actions/workflows/*/dispatches`).
 
-**The fixed workflows have to reach `main` first.** `workflow_dispatch` runs
-the copy on the default branch, and the repaired YAML is on
-`arena/01a0e51d-fork-xc-vm` behind PR #1. Merge, then run the three.
+**Two ways to start them now.** `workflow_dispatch` runs the copy on the
+default branch, so it needs PR #1 merged first — and it needs the Actions tab
+or a real `gh`, which the user's machine does not have (its `gh` is gitsome).
+So both mirrors also trigger on a pushed tag, which any git client can do and
+which runs the workflow file *at the tagged commit*, branch or not:
+
+    git tag seed-base-2.3.9  && git push origin seed-base-2.3.9    # base layer
+    git tag seed-binaries    && git push origin seed-binaries      # binaries
+    git tag 2.3.9            && git push origin 2.3.9              # the release
+
+`seed-*` deliberately does not match the `base-<version>` and
+`binaries-<tag>` releases those jobs publish, so neither can retrigger itself.
+The tag is only a doorbell — the version still comes from `AppConfig.php`.
+
+**A plain `N.N.N` tag now publishes a stable release.** `prerelease` used to
+default to `true` on anything that was not dispatched by hand, so a pushed
+`2.3.9` was published as a prerelease — and `GitHubReleases` drops prereleases
+on the stable channel, making the one tag that exists to be seen by the
+in-panel updater invisible to it. The flag is now derived from the tag when
+the run was not dispatched: `2.3.9` stable, `v2.3.9-flussonic.19` prerelease.
 
 Until a release exists here, the redirection is inert and upstream still wins
 by default. Resolved live against the API while writing this:
