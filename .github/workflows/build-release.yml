@@ -305,7 +305,14 @@ jobs:
           fi
 
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release edit "$TAG" --title "XC_VM $TAG" --notes-file release-body.md
+            # --draft and --prerelease are reconciled on every edit, not just
+            # set at creation. A release whose tag is deleted is demoted to a
+            # draft by GitHub, and a draft is invisible to the in-panel
+            # updater exactly like a prerelease is, so rebuilding an existing
+            # tag has to be able to put it back rather than quietly refresh
+            # the notes of something nobody can see.
+            gh release edit "$TAG" --title "XC_VM $TAG" --notes-file release-body.md \
+              --draft=false --prerelease="$PRERELEASE"
           else
             flags=""
             [ "$PRERELEASE" = "true" ] && flags="--prerelease"

@@ -44,47 +44,56 @@ install and not the server's own.
 The repo exists, is public, and holds the source layer — 6148 files, 123 MB,
 no `bin/`, exactly what `build/publish-source-to-fork.sh` emits.
 
-**3. Run the fork's workflows,** in order: *Mirror upstream base archive*,
-*Mirror upstream binaries*, then *Build Release* with tag `2.3.9`. After the
-two mirrors, neither installing nor updating touches Vateron-Media.
+**3. ~~Run the fork's workflows.~~ Done — the three releases exist.**
 
-This is still pending, and until this session it could not have worked —
-see the first two entries under "Faults found in the fork's own CI" below.
-The Actions tab is the only way in: a session token scoped to this repo
-**cannot dispatch workflows** (`HTTP 403` on `actions/workflows/*/dispatches`).
+    2.3.9              XC_VM 2.3.9              stable       XC_VM.zip, xc_vm.tar.gz, hashes.md5
+    binaries-29062026  XC_VM binaries 29062026  prerelease   6 distro tarballs + hashes.md5
+    base-2.3.9         Base deploy tree 2.3.9   prerelease   xc_vm.tar.gz, hashes.md5
 
-**Two ways to start them now.** `workflow_dispatch` runs the copy on the
-default branch, so it needs PR #1 merged first — and it needs the Actions tab
-or a real `gh`, which the user's machine does not have (its `gh` is gitsome).
-So both mirrors also trigger on a pushed tag, which any git client can do and
-which runs the workflow file *at the tagged commit*, branch or not:
+`2.3.9` is published stable, so it is the only tag the panel's stable channel
+returns. Its own notes record its provenance: *"Nothing was taken from
+`Vateron-Media/XC_VM` to produce this release."* All three assets resolve
+anonymously (`302` to the CDN without a token), which is what an install needs.
 
-    git tag seed-base-2.3.9  && git push origin seed-base-2.3.9    # base layer
-    git tag seed-binaries    && git push origin seed-binaries      # binaries
-    git tag 2.3.9            && git push origin 2.3.9              # the release
+**What the archive does and does not carry.** Upstream ships `bin/` as a
+skeleton and so does this release, because it is built from upstream's base
+archive. `redis` and `ffmpeg` are in it; `bin/php/bin/php`, `xcvm_core.so`,
+`nginx` and `nginx_rtmp` are not — the installer downloads those per
+distribution, now from this repository's own `binaries-29062026` rather than
+from upstream. The release notes list them by name; that list is generated
+from the build, not written by hand, so it cannot drift from the artefact.
 
-`seed-*` deliberately does not match the `base-<version>` and
-`binaries-<tag>` releases those jobs publish, so neither can retrigger itself.
-The tag is only a doorbell — the version still comes from `AppConfig.php`.
+**The in-panel updater will not offer 2.3.9 to a panel already on 2.3.9.**
+`getLatestVersion()` returns null unless `version_compare($latest, $current,
+'<=')` is false. So this release is for fresh installs; the Update button
+starts working the next time the fork publishes a higher number. That is the
+desired behaviour, not a gap — and the button is now safe, because it resolves
+to this fork and no longer to upstream's unpatched tree.
 
-**A plain `N.N.N` tag now publishes a stable release.** `prerelease` used to
-default to `true` on anything that was not dispatched by hand, so a pushed
-`2.3.9` was published as a prerelease — and `GitHubReleases` drops prereleases
-on the stable channel, making the one tag that exists to be seen by the
-in-panel updater invisible to it. The flag is now derived from the tag when
-the run was not dispatched: `2.3.9` stable, `v2.3.9-flussonic.19` prerelease.
+**How to cut the next release.** Three tags, in order; each is only a
+doorbell, the version itself still comes from `AppConfig.php`:
 
-Until a release exists here, the redirection is inert and upstream still wins
-by default. Resolved live against the API while writing this:
+    git tag seed-base-2.4.0 && git push origin seed-base-2.4.0   # base layer
+    git tag seed-binaries   && git push origin seed-binaries     # distro binaries
+    git tag 2.4.0           && git push origin 2.4.0             # the release
 
-    TalaveraSama/fork_xc_vm        -> None
-    Vateron-Media/XC_VM_Binaries   -> 29062026
-    ==> source chosen: Vateron-Media/XC_VM_Binaries
+The mirrors are idempotent: they skip when the tag is already mirrored, so
+re-running them costs nothing. `seed-*` deliberately does not match the
+`base-<version>` and `binaries-<tag>` releases those jobs publish, so neither
+can retrigger itself. `workflow_dispatch` also works from the Actions tab, but
+not from the user's machine, whose `gh` is gitsome.
 
-That is `resolve_binaries_source()` run verbatim. The fork is first in the
-list and is skipped because it has nothing to offer yet.
+**Never delete the tag of a published release.** GitHub demotes the release to
+a *draft* the moment its tag disappears, and a draft is invisible to the
+updater in exactly the way a prerelease is. This happened here while
+re-cutting `2.3.9`. To move a tag that already has a release on it:
 
-Confirmed ready for it: upstream still publishes `2.3.9` as a stable release
+    git tag -f 2.3.9 HEAD && git push --force origin 2.3.9
+
+which updates the ref without it ever ceasing to exist. If one does get
+demoted, the build's publish step now repairs it — it reconciles `--draft` and
+`--prerelease` on every edit instead of only setting them at creation.
+
 with `xc_vm.tar.gz` (174 MB) and `hashes.md5`, and `XC_VM_Binaries` still has
 `29062026` with 7 assets. Both mirrors have something to copy.
 
@@ -218,7 +227,9 @@ and is not. Each was reproduced before being fixed.
 
 ## Faults found in the fork's own CI
 
-Same rule: do not revert these. All four were verified, not reasoned about.
+Same rule: do not revert these. Every one was verified, not reasoned about.
+The last five were found by running the release end to end; each had stopped
+it dead, and none was visible from reading the files.
 
 - **`mirror.yml` and `mirror-base.yml` were not valid YAML, and had already
   failed.** In each, the continuation lines of the `--notes "..."` string sat
@@ -248,6 +259,38 @@ Same rule: do not revert these. All four were verified, not reasoned about.
   patched file's blob SHA at both tags, which is exact for the cost of 15 API
   calls, and marks the headline count `300+ (list truncated)` when the cap is
   hit.
+- **The mirror jobs had no repository to act on.** `gh` infers that from the
+  git checkout it runs in, and `mirror.yml` deliberately never checks the tree
+  out — it only moves release assets. So every `gh release` call in its publish
+  step, none of which passed `--repo`, died on "failed to run git: fatal: not a
+  git repository" *after* downloading and verifying 456 MB. `mirror-base.yml`
+  survived only because it checks out for an unrelated reason. Fixed with
+  `GH_REPO` at workflow level, which an explicit `--repo` still overrides, so
+  the reads from upstream are unaffected. `build/data-mirror/mirror-data.yml`
+  had the identical latent fault and was fixed with it.
+- **`build/binaries-mirror/` was not valid YAML either** — the same column-0
+  continuation lines as the two active workflows, in the copy `bootstrap.sh`
+  installs into a mirror repository. It would have sat there doing nothing.
+- **Every script in `build/` had lost its executable bit.** The release build
+  failed with exit code 126 — found but not executable — because the workflow
+  runs `build/build-release.sh` directly, as `build/README.md` documents. The
+  same was true of `install`, `uninstall`, `doctor`, `repair-database` and the
+  helper scripts; `install` matters beyond CI, since it ships inside
+  `XC_VM.zip` and is what someone runs to install the panel. All are `100755`
+  now.
+- **`build-release.sh` demanded a complete runtime from a base archive.** Both
+  of its completeness checks were written for the original model, where `bin/`
+  was captured off a live panel. Upstream's base archive carries a skeleton, so
+  the check rejected every base archive in existence — including upstream's own
+  for the version being built. The requirement now depends on where the layer
+  came from; a captured `bin/` is still held to the full list.
+- **The release notes described an archive that was not being built.** They
+  promised the full runtime was bundled and that "the install still completes
+  if `XC_VM_Binaries` is unreachable", which a base-archive build makes false.
+  The paragraph is now generated from an inventory the build writes, so it
+  cannot drift from the artefact. The template keeps a `@@RUNTIME@@` marker and
+  the substitution asserts it is there, so removing it fails the build rather
+  than publishing notes with a hole.
 
 ## This fork modifies eighteen upstream files
 
