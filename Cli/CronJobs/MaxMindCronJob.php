@@ -74,7 +74,14 @@ class MaxMindCronJob implements CommandInterface {
 			}
 		} else {
 			echo "MaxMind credentials not configured — using GitHub GeoLite2 fallback.\n";
-			$repo = new GitHubReleases(GIT_OWNER_UPDATE, GIT_REPO_UPDATE, $rSettings['update_channel']);
+			// Fork mirror first, upstream as a safety net. A missing mirror is a
+			// 404, and letting that throw turns a skipped data refresh into an
+			// EXCEPTION in the panel log.
+			$repo = GitHubReleases::locate([GIT_OWNER_UPDATE, GIT_OWNER], GIT_REPO_UPDATE, $rSettings['update_channel']);
+			if ($repo === null) {
+				echo '[ERROR] No GeoLite2 mirror reachable (tried ' . GIT_OWNER_UPDATE . ' and ' . GIT_OWNER . '/' . GIT_REPO_UPDATE . ")\n";
+				return 1;
+			}
 			$datageolite = $repo->getGeolite();
 			if (is_array($datageolite)) {
 				foreach ($datageolite['files'] as $rFile) {

@@ -63,21 +63,24 @@ class BinariesCommand implements CommandInterface {
 			$rChannel = $rSettings['update_channel'];
 		}
 
+		// getBinariesTag(), not getReleases()[0]: the runtime lives in a
+		// `binaries-*` prerelease alongside the panel's version tags, so the
+		// newest stable release is the panel and has no runtime asset to fetch.
 		try {
 			$gitRelease = new GitHubReleases(GIT_OWNER_BIN, GIT_REPO_BIN, $rChannel);
 			$gitRelease->setTimeout(20);
-			$rReleases = $gitRelease->getReleases();
+			$rLatestVersion = $gitRelease->getBinariesTag();
 		} catch (\Exception $e) {
 			echo 'Failed to check binaries releases: ' . $e->getMessage() . "\n";
 			return 1;
 		}
 
-		if (empty($rReleases[0])) {
+		if (empty($rLatestVersion)) {
 			echo "Failed to resolve latest binaries release.\n";
 			return 1;
 		}
 
-		$rLatestVersion = trim($rReleases[0]);
+		$rLatestVersion = trim($rLatestVersion);
 
 		if (!empty($rCurrentVersion) && $rCurrentVersion === $rLatestVersion) {
 			echo 'Binaries are up to date (' . $rCurrentVersion . '). Skipping update.' . "\n";

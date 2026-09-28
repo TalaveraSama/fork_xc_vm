@@ -379,6 +379,62 @@ and the new diagnostics are longer than that, so they overflow their frames.
 Readable, but untidy. Shortening those strings means republishing the archive,
 which is why it was not done mid-install.
 
+### The binaries updater could never succeed, and retried every minute
+
+The first live panel logged `BINARIES  Updating XC_VM binaries from XC_VM
+server...` once a minute, for hours, and a weekly `EXCEPTION  Resource not
+found (404)` out of `MaxMindCronJob`. Two separate faults, both created by
+pointing the fork's constants at repositories that are not shaped the way the
+code assumed.
+
+**The loop.** `BinariesCommand` took `getReleases()[0]` as "the latest
+binaries release". In upstream that is right: `XC_VM_Binaries` is a
+single-purpose repository whose newest release *is* the runtime. This fork
+publishes both kinds of release into one repository — the panel under `2.4.0`,
+the runtime under the `binaries-29062026` **prerelease** — so `getReleases()[0]`
+on the stable channel returns `2.4.0`, whose assets are `xc_vm.tar.gz`,
+`XC_VM.zip` and `hashes.md5`. No `debian_12.tar.gz` to fetch. So:
+`bin_version.json` says `binaries-29062026`, the updater says the latest is
+`2.4.0`, they differ, `update_binaries.sh` runs, finds no asset, fails, and
+leaves `bin_version.json` untouched — which guarantees the next run repeats it.
+Selecting the unstable channel does not help: `2.4.0` is still first.
+
+`build/install` already got this right —
+`get_latest_binaries_tag()` prefers a `binaries-` tag and only falls back to the
+newest stable release for upstream's single-purpose repo. The panel now shares
+that rule through `GitHubReleases::getBinariesTag()`. Verified against the live
+API payload: before, `2.4.0` on both channels (update attempted); after,
+`binaries-29062026` (skipped, because it equals what is installed). An owner
+with no `binaries-` tag still resolves to its newest stable release, so upstream
+keeps working as a fallback.
+
+Worth knowing: the once-a-minute *cadence* is not the updater's. The signal is
+created by `console.php status`, which `StartupCommand` runs on every service
+start, and consumed at most once per minute by `cron:root_signals`. A panel that
+logs this line every minute is starting the `xc_vm` unit every minute — the unit
+is `Type=simple` with `Restart=always` and `RestartSec=1`, and
+`ExecStart=/bin/bash /home/xc_vm/service start` returns once the daemons are up.
+`systemctl show xc_vm -p NRestarts` settles it. The fix here stops the futile
+download; it does not stop a restart loop.
+
+**The 404.** `GIT_OWNER_UPDATE` and `GIT_OWNER_PROXY` were moved to
+`TalaveraSama` ahead of the mirrors existing, so `MaxMindCronJob` and
+`ProxyArchiveCronJob` asked GitHub for a repository that is not there. 404
+raises out of `getReleases()`, and an uncaught throw from a cron job lands in
+the panel log as an EXCEPTION — for what is only a data refresh. Both now go
+through `GitHubReleases::locate()`, which walks a list of owners and returns the
+first that actually serves releases: this fork first, upstream as a safety net,
+the same shape as `BINARIES_SOURCES` and `PANEL_SOURCES` in `build/install`.
+When no owner answers, the job prints `[ERROR]` and returns 1 instead of
+throwing. Creating `TalaveraSama/XC_VM_Update` and `TalaveraSama/XC_VM_Proxy`
+therefore becomes a silent upgrade rather than a prerequisite.
+
+That change exposed a latent bug that had to be fixed with it: the releases
+cache was keyed `gitapi_<repo>_<channel>`, with no owner. Two owners of a
+repository called `XC_VM_Update` shared one cache file, so `locate()` could hand
+back one owner's tag list while the download URLs were built from another's.
+The key now includes the owner.
+
 ## Faults found in the fork's own CI
 
 Same rule: do not revert these. Every one was verified, not reasoned about.
@@ -446,7 +502,7 @@ it dead, and none was visible from reading the files.
   the substitution asserts it is there, so removing it fails the build rather
   than publishing notes with a hole.
 
-## This fork modifies eighteen upstream files
+## This fork modifies nineteen upstream files
 
 Established by byte comparison against a clone of upstream 2.3.9, with the two
 corrections a naive diff needs:
@@ -459,9 +515,11 @@ corrections a naive diff needs:
   pointer. Our copy's sha256 matches the pointer's oid exactly: not patched.
 
 The list lives in `.github/patched-upstream-files.txt` and is the single
-source of truth for both workflows. It is **18 files** since the GeoIP and
-proxy sources were redirected too; re-measure with the byte comparison above
-rather than trusting this number. The one that the original handoff missed is
+source of truth for both workflows. It is **19 files**: 18 once the GeoIP and
+proxy sources were redirected, plus `Core/Updates/GitHubReleases.php` when the
+binaries updater had to learn that this fork keeps the runtime in a
+`binaries-` prerelease. Re-measure with the byte comparison above rather than
+trusting this number. The one that the original handoff missed is
 `resources/langs/en.ini`, which the previous handoff missed. It is **not a
 deliberate patch**: the panel appends missing language keys at runtime with
 the key as its own value, and that edit came across when the source was

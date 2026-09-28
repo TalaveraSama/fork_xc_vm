@@ -32,8 +32,12 @@
 # Reverting any of these puts the panel back in a state that looks installed
 # and is not. Each was reproduced on the real server before being fixed.
 
+Cli/Commands/BinariesCommand.php
 Cli/Commands/StatusCommand.php
+Cli/CronJobs/MaxMindCronJob.php
+Cli/CronJobs/ProxyArchiveCronJob.php
 Core/Module/ModuleMigrator.php
+Core/Updates/GitHubReleases.php
 Public/Views/admin/topbar.php
 migrations/002_add_maxmind_cron.sql
 migrations/008_add_module_updates_cron.sql
@@ -45,13 +49,15 @@ service
 # GIT_OWNER_MAIN / GIT_OWNER_BIN / GIT_OWNER_UPDATE / GIT_OWNER_PROXY and the
 # repo names. No behaviour changes, so an upstream release touching these is
 # cheap to re-apply: swap the owner constant back in and the patch is done.
+#
+# BinariesCommand, MaxMindCronJob and ProxyArchiveCronJob used to live here.
+# They moved up: pointing the constants at this fork changed the *shape* of the
+# repositories they talk to, and the code had to learn that shape. Re-applying
+# them is no longer a constant swap.
 
-Cli/Commands/BinariesCommand.php
 Cli/Commands/LbInstallFlow.php
 Cli/Commands/ServerInstallCommand.php
 Cli/Commands/UpdateCommand.php
-Cli/CronJobs/MaxMindCronJob.php
-Cli/CronJobs/ProxyArchiveCronJob.php
 Cli/CronJobs/UpdateCronJob.php
 Core/Config/AppConfig.php
 Core/Proxy/ProxyArchiveUpdater.php

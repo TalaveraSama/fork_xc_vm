@@ -42,7 +42,11 @@ class GitHubReleases {
         $this->owner = $owner;
         $this->repo = $repo;
         $this->channel = in_array($channel, ['stable', 'unstable']) ? $channel : 'stable';
-        $this->cache_file = "{$this->cache_file}_{$repo}_{$this->channel}"; // Уникальный кэш для канала
+        // Keyed by owner too: locate() walks several owners of the same
+        // repository name, and a cache shared between them would serve one
+        // owner's tag list while the download URLs are built from another.
+        $rSlug = preg_replace('/[^A-Za-z0-9._-]/', '_', "{$owner}_{$repo}");
+        $this->cache_file = "{$this->cache_file}_{$rSlug}_{$this->channel}"; // Уникальный кэш для owner+repo+канала
         $this->api_url = "https://api.github.com/repos/{$owner}/{$repo}/releases";
         $this->headers = $token ? [
             "Authorization: Bearer {$token}",
@@ -164,6 +168,116 @@ class GitHubReleases {
             error_log("Failed to fetch releases: " . $e->getMessage());
             throw $e;
         }
+    }
+
+    /**
+     * Fetch the release list unfiltered, honouring the cache.
+     *
+     * getReleases() drops the prerelease flag on the way out, so callers that
+     * need to tell a prerelease apart from a stable one cannot use it.
+     *
+     * @return array The decoded /releases payload.
+     * @throws \Exception When the request fails or the payload is not JSON.
+     */
+    private function getRawReleases(): array {
+        if ($this->isCacheValid()) {
+            $cache = $this->loadCache();
+            if (is_array($cache)) {
+                return $cache;
+            }
+        }
+
+        $data = json_decode($this->makeRequest($this->api_url), true);
+        if (!is_array($data)) {
+            throw new \Exception("Failed to parse API response: " . json_last_error_msg());
+        }
+
+        $this->saveCache($data);
+        return $data;
+    }
+
+    /**
+     * Newest release holding the per-distribution runtime tarballs.
+     *
+     * This fork publishes two kinds of release side by side in one repository:
+     * the panel under a version tag (2.4.0) and the mirrored runtime under
+     * `binaries-<upstream tag>`. The binaries release is a prerelease, so it is
+     * never getReleases()[0] on the stable channel -- that hands back the panel
+     * tag, which carries no per-distribution asset. The updater then downloads
+     * nothing, bin_version.json is never rewritten, and the next update_binaries
+     * signal retries the same doomed download, once a minute, forever.
+     *
+     * Mirrors get_latest_binaries_tag() in build/install so a running panel and
+     * a fresh install agree on which release holds the runtime.
+     *
+     * @return string|null Newest `binaries-` tag; the newest stable tag when the
+     *                     repository has none (upstream single-purpose
+     *                     XC_VM_Binaries); null when there is no usable release.
+     * @throws \Exception When the release list cannot be fetched.
+     */
+    public function getBinariesTag(): ?string {
+        $releases = $this->getRawReleases();
+
+        foreach ($releases as $release) {
+            if (!empty($release['draft'])) {
+                continue;
+            }
+            $tag = trim((string) ($release['tag_name'] ?? ''));
+            if (strncmp($tag, 'binaries-', 9) === 0) {
+                return $tag;
+            }
+        }
+
+        foreach ($releases as $release) {
+            if (!empty($release['draft']) || !empty($release['prerelease'])) {
+                continue;
+            }
+            $tag = trim((string) ($release['tag_name'] ?? ''));
+            if ($tag !== '') {
+                return $tag;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * First owner in $rOwners whose copy of $repo actually serves releases.
+     *
+     * The data repositories (XC_VM_Update, XC_VM_Proxy) are mirrors: this fork
+     * owns one so an install does not depend on upstream staying reachable, but
+     * the mirror may not exist yet. Asking GitHub for a repository that is not
+     * there answers 404, which getReleases() raises -- and an uncaught throw out
+     * of a cron job lands in the panel log as an EXCEPTION for what is only a
+     * data refresh. Try the owners in order and let the caller decide what to do
+     * when none answers. Same shape and same order as BINARIES_SOURCES and
+     * PANEL_SOURCES in build/install: this fork first, upstream as a safety net.
+     *
+     * @param string[] $rOwners Candidate owners, most preferred first.
+     * @return self|null Ready instance, or null when no owner served a release.
+     */
+    public static function locate(array $rOwners, string $repo, ?string $channel = 'stable', ?string $token = null): ?self {
+        $rSeen = [];
+
+        foreach ($rOwners as $rOwner) {
+            $rOwner = trim((string) $rOwner);
+            if ($rOwner === '' || isset($rSeen[$rOwner])) {
+                continue;
+            }
+            $rSeen[$rOwner] = true;
+
+            $rCandidate = new self($rOwner, $repo, $channel, $token);
+            try {
+                if (!empty($rCandidate->getReleases())) {
+                    return $rCandidate;
+                }
+                error_log("No releases in {$rOwner}/{$repo}, trying next owner");
+            } catch (\Exception $e) {
+                error_log("Mirror {$rOwner}/{$repo} unusable: " . $e->getMessage());
+            }
+        }
+
+        return null;
     }
 
     /**
