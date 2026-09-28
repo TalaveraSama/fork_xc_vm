@@ -146,7 +146,7 @@ It holds two kinds of release side by side:
 
 | Tag | Contents | Who reads it |
 | --- | --- | --- |
-| `2.3.9` (a version) | `xc_vm.tar.gz`, `XC_VM.zip`, `hashes.md5` | the installer, and the panel's own updater |
+| `2.4.0` (a version) | `xc_vm.tar.gz`, `XC_VM.zip`, `hashes.md5` | the installer, and the panel's own updater |
 | `binaries-29062026` | the six per-distribution tarballs | `install` when replacing `bin/` |
 
 They cannot share a namespace: the updater compares tags with PHP's

@@ -35,6 +35,10 @@ on:
     tags:
       - 'verify-*'
   # Every future release gets checked without anyone remembering to.
+  # Note: this does NOT fire for releases made by build-release.yml. GitHub
+  # refuses to start workflows from events raised with the default
+  # GITHUB_TOKEN, and publishing 2.4.0 started no verify run. Kept for a
+  # release published by hand in the web UI; otherwise push a verify-<v> tag.
   release:
     types: [published]
 

@@ -46,14 +46,30 @@ install and not the server's own.
 The repo exists, is public, and holds the source layer — 6148 files, 123 MB,
 no `bin/`, exactly what `build/publish-source-to-fork.sh` emits.
 
-**3. ~~Run the fork's workflows.~~ Done — the three releases exist.**
+**3. ~~Run the fork's workflows.~~ Done — the releases exist.**
 
+    2.4.0              XC_VM 2.4.0              stable       XC_VM.zip, xc_vm.tar.gz, hashes.md5
     2.3.9              XC_VM 2.3.9              stable       XC_VM.zip, xc_vm.tar.gz, hashes.md5
     binaries-29062026  XC_VM binaries 29062026  prerelease   6 distro tarballs + hashes.md5
+    base-2.4.0         Base deploy tree 2.4.0   prerelease   xc_vm.tar.gz, hashes.md5, upstream-tag.txt
     base-2.3.9         Base deploy tree 2.3.9   prerelease   xc_vm.tar.gz, hashes.md5
 
-`2.3.9` is published stable, so it is the only tag the panel's stable channel
-returns. Its own notes record its provenance: *"Nothing was taken from
+`2.4.0` is the newest stable, so it is what the panel's stable channel returns
+and what the Update button offers. Both base layers hold the same 174,180,187
+byte archive — upstream's 2.3.9 — because that is the tree this source is
+built from regardless of the number on the front.
+
+Verified installable on all six distributions after being rebuilt at 2.4.0:
+`complete tree after install on: debian_11, debian_12, debian_13, ubuntu_20,
+ubuntu_22, ubuntu_24`, deploy tree 6157 files.
+
+**The `release: [published]` trigger in `verify-release.yml` never fires for
+our own releases.** GitHub does not start workflows from events raised with
+the default `GITHUB_TOKEN`, so a release published by `build-release.yml`
+starts nothing. Observed, not assumed: 2.4.0 was published and no verify run
+appeared. The trigger is still worth keeping for a release published by hand
+in the web UI; the reliable route is the doorbell tag,
+`git tag verify-<v> && git push origin verify-<v>`, then delete it. Its own notes record its provenance: *"Nothing was taken from
 `Vateron-Media/XC_VM` to produce this release."* All three assets resolve
 anonymously (`302` to the CDN without a token), which is what an install needs.
 
