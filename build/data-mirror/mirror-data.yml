@@ -42,6 +42,16 @@ concurrency:
   group: mirror-data
   cancel-in-progress: false
 
+env:
+  # gh infers which repository to act on from the git checkout it is run in.
+  # These mirror jobs deliberately never check the tree out — they only move
+  # release assets between repositories, and cloning would be pure waste — so
+  # there is no .git for gh to read and every `gh release` call that omits
+  # --repo dies with "failed to run git: fatal: not a git repository". An
+  # explicit --repo still overrides this, which is what the calls that read
+  # from upstream rely on.
+  GH_REPO: ${{ github.repository }}
+
 jobs:
   mirror:
     name: Mirror release assets
