@@ -367,9 +367,15 @@ that release also modified — the only ones needing manual work.
 
 Upstream's 2.5.x line is tagged but published as prereleases, so the watcher
 ignores it: their latest stable is still 2.3.9. This fork ships **2.4.0** --
-deliberately one ahead, so a panel installed from here is offered this fork's
-updates instead of sitting on a number upstream also uses. The watcher knows
-it can be ahead and stays quiet until upstream passes it.
+deliberately ahead, so a panel installed from here is offered this fork's
+updates instead of sitting on a number upstream also uses.
+
+Because upstream's 2.4.x tags exist as prereleases, the version this fork
+ships and the upstream release it is built from are kept as separate facts:
+`.github/upstream-base.txt` names the latter (`2.3.9`). The base-layer mirror
+downloads that tag, the release notes credit it, and the watcher uses it as
+the ref to compare from — asking upstream for "our" number would quietly pick
+up their unreleased line.
 
 ### Never use the panel's Update button
 

@@ -113,10 +113,17 @@ jobs:
             gh release download "base-$version" --repo "$GITHUB_REPOSITORY" \
               --pattern 'upstream-tag.txt' --dir "$RUNNER_TEMP" 2>/dev/null || true
             if [ -s "$RUNNER_TEMP/upstream-tag.txt" ]; then
-              echo "upstream_version=$(tr -d '\r\n' < "$RUNNER_TEMP/upstream-tag.txt")" >> "$GITHUB_OUTPUT"
+              up=$(tr -d '\r\n' < "$RUNNER_TEMP/upstream-tag.txt")
             else
-              echo "upstream_version=$version" >> "$GITHUB_OUTPUT"
+              # Base releases predating that asset. Ask the manifest rather
+              # than assuming $version: the two are different facts, and
+              # upstream's 2.4.x tags exist as prereleases, so the assumption
+              # would credit a tree nobody built against.
+              up=$(grep -vE '^[[:space:]]*(#|$)' .github/upstream-base.txt 2>/dev/null \
+                   | head -1 | tr -d '[:space:]' || true)
+              [ -n "$up" ] || up="$version"
             fi
+            echo "upstream_version=$up" >> "$GITHUB_OUTPUT"
             ls -la "$RUNNER_TEMP/xc_vm.tar.gz"; exit 0
           fi
 

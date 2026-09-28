@@ -97,14 +97,26 @@ chores:
     `@@VERSION@@` and `@@UPSTREAM_VERSION@@`, and `build-release.yml` fails the
     build if a marker is missing, if a substitution is empty, or if any `@@...@@`
     survives into the published notes.
-  * `mirror-base.yml` asked upstream for `$VERSION`, which upstream does not
-    have once this fork runs ahead. It now falls back to upstream's newest
-    release, warns which tag it took, and publishes that tag as
-    `upstream-tag.txt` beside the archive — so the panel notes quote the layer
-    actually used rather than whatever upstream publishes on build day.
-  * `watch-upstream.yml` compared the two numbers with string equality, which
-    would have opened a "upstream released 2.3.9 (we ship 2.4.0)" issue every
-    week. It now compares with `sort -V` and stays quiet while this fork leads.
+  * `mirror-base.yml` asked upstream for `$VERSION`. That looked harmless
+    while the two numbers matched and is actively wrong now: upstream **does**
+    have a `2.4.0`, as a *prerelease* of their unreleased 2.4.x/2.5.x line, so
+    the first seeded `base-2.4.0` came back holding a deploy tree this fork's
+    source was never built against. The upstream release the source layer
+    derives from is now stated outright in `.github/upstream-base.txt`
+    (`2.3.9`), and that tag is published as `upstream-tag.txt` beside the
+    archive so the panel notes credit the layer actually used.
+  * `watch-upstream.yml` compared upstream's newest stable against
+    `XC_VM_VERSION`. Two faults: string equality meant a weekly
+    "upstream released 2.3.9 (we ship 2.4.0)" false alarm, and `$ours` was
+    also used as a **git ref inside upstream's repository** for the compare
+    and the per-file blob lookups — at 2.4.0 that resolves to their
+    prerelease, and at a number they never published it 404s and reports
+    every patched file as colliding. It reads `upstream-base.txt` for the
+    ref now and compares with `sort -V`.
+
+The rule the three share: this fork's version number and the upstream release
+it is built on are separate facts, and anything that needs the second must ask
+`.github/upstream-base.txt` rather than infer it from the first.
 
 Migrations do not need a hand: `MigrationRunner` applies them by filename, not
 by version, so the bump adds no schema work. The binaries mirror is keyed on

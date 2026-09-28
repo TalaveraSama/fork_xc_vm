@@ -41,23 +41,31 @@ jobs:
                    --jq 'map(select(.prerelease == false and .draft == false))
                          | .[0].tag_name')
 
-          echo "ours=$ours  upstream stable=$theirs"
+          # The question is "is there upstream work to merge", and this fork's
+          # own number cannot answer it: it runs ahead on purpose, so comparing
+          # against it goes quiet the moment it passes upstream's. Worse, $ours
+          # is used below as a git ref inside upstream's repository -- at 2.4.0
+          # that silently resolves to their 2.4.0 prerelease, and at a number
+          # they never published it 404s and every file reads as a collision.
+          # `|| true` for the same reason as in mirror-base.yml: without it a
+          # missing or comment-only file aborts the step under `set -e`.
+          base=$(grep -vE '^[[:space:]]*(#|$)' .github/upstream-base.txt 2>/dev/null \
+                 | head -1 | tr -d '[:space:]' || true)
+          [ -n "$base" ] || base="$ours"
 
-          if [ -z "$theirs" ] || [ "$ours" = "$theirs" ]; then
+          echo "fork ships $ours, built on upstream $base; upstream stable=$theirs"
+
+          if [ -z "$theirs" ] || [ "$base" = "$theirs" ]; then
             echo "Nothing newer to move to." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-
-          # This fork's number can sit ahead of upstream's -- 2.4.0 here while
-          # their newest stable is 2.3.9. Plain inequality then fires every
-          # week about a release already merged in this tree, and a weekly
-          # false alarm is exactly how a real one ends up ignored.
-          if [ "$(printf '%s\n%s\n' "$ours" "$theirs" | sort -V | tail -1)" = "$ours" ]; then
-            echo "Upstream stable $theirs is not newer than $ours." >> "$GITHUB_STEP_SUMMARY"
+          if [ "$(printf '%s\n%s\n' "$base" "$theirs" | sort -V | tail -1)" = "$base" ]; then
+            echo "Upstream stable $theirs is not newer than the $base this fork is built on." \
+              >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          title="Upstream released $theirs (we ship $ours)"
+          title="Upstream released $theirs (this fork is built on $base)"
           if gh issue list --state open --search "$title in:title" \
                --json title --jq '.[].title' | grep -qxF "$title"; then
             echo "Already tracked." >> "$GITHUB_STEP_SUMMARY"
@@ -85,14 +93,14 @@ jobs:
           # direction to be wrong in. Measured on 2.3.9...2.5.3: the truncated
           # list reported one collision, the blob comparison found twelve.
           # Fifteen extra API calls buy an answer that is exact.
-          stats=$(gh api "repos/$UPSTREAM/compare/$ours...$theirs" \
+          stats=$(gh api "repos/$UPSTREAM/compare/$base...$theirs" \
                   --jq '"\(.total_commits) commits, \(.files | length)\(if (.files|length) >= 300 then "+ (list truncated)" else "" end) files"')
 
           collisions=0
           : > /tmp/verdicts.txt
           while IFS= read -r f || [ -n "$f" ]; do
             case "$f" in ''|'#'*) continue ;; esac
-            before=$(gh api "repos/$UPSTREAM/contents/src/$f?ref=$ours"   --jq '.sha' 2>/dev/null || echo '')
+            before=$(gh api "repos/$UPSTREAM/contents/src/$f?ref=$base"   --jq '.sha' 2>/dev/null || echo '')
             after=$(gh api  "repos/$UPSTREAM/contents/src/$f?ref=$theirs" --jq '.sha' 2>/dev/null || echo '')
             if [ -z "$after" ]; then
               printf 'gone|%s\n' "$f" >> /tmp/verdicts.txt
@@ -107,7 +115,8 @@ jobs:
           echo "$collisions of $patched patched files collide with $theirs"
 
           {
-            echo "Upstream's latest stable release is \`$theirs\`; this fork ships \`$ours\`."
+            echo "Upstream's latest stable release is \`$theirs\`; this fork ships \`$ours\`,"
+            echo "built on upstream \`$base\`."
             echo
             echo "Difference: **$stats**."
             echo

@@ -74,16 +74,26 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "tag=base-$v" >> "$GITHUB_OUTPUT"
 
-          # This fork's numbering can run ahead of upstream's -- 2.4.0 here has
-          # no counterpart at Vateron-Media. Fall back to upstream's newest
-          # release so bumping the version does not stall the base layer, and
-          # record which tag was actually taken: the panel release notes quote
-          # it, and a wrong number there is a lie shipped to every installer.
-          up="$v"
-          if ! gh release view "$v" --repo "$UPSTREAM" >/dev/null 2>&1; then
+          # Which upstream release the base layer must come from. Deliberately
+          # not $v: this fork's number runs ahead, and upstream's 2.4.x/2.5.x
+          # tags are prereleases of an unreleased line, so asking them for
+          # "2.4.0" succeeds and returns a tree this source was never built
+          # against. Only the manifest knows the real answer.
+          manifest=.github/upstream-base.txt
+          # `|| true`: grep exits 1 on no match and 2 on no file, and under
+          # `set -e` that kills the step here instead of at the check below --
+          # leaving the fallback unreachable and the failure unexplained.
+          up=$(grep -vE '^[[:space:]]*(#|$)' "$manifest" 2>/dev/null \
+               | head -1 | tr -d '[:space:]' || true)
+          if [ -z "$up" ]; then
+            # `releases/latest` is stable-only, so this cannot pick a prerelease.
             up=$(gh release view --repo "$UPSTREAM" --json tagName --jq .tagName 2>/dev/null || true)
-            [ -n "$up" ] || { echo "::error::$UPSTREAM publishes no releases at all"; exit 1; }
-            echo "::warning::$UPSTREAM has no $v; taking its latest, $up, as the base layer for $v"
+            [ -n "$up" ] || { echo "::error::no $manifest, and $UPSTREAM has no stable release"; exit 1; }
+            echo "::warning::no $manifest; falling back to $UPSTREAM's latest stable, $up"
+          fi
+          if ! gh release view "$up" --repo "$UPSTREAM" >/dev/null 2>&1; then
+            echo "::error::$manifest asks for $UPSTREAM @ $up, which does not exist"
+            exit 1
           fi
           echo "upstream_tag=$up" >> "$GITHUB_OUTPUT"
           echo "mirroring $UPSTREAM @ $up as base-$v"
