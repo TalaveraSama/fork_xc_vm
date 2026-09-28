@@ -315,7 +315,28 @@ class FlussonicSyncService {
 	 */
 	private static function findStreamBySource(string $rSource): int {
 		$db = self::db();
-		$rNeedle = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $rSource) . '%';
+
+		// `streams`.`stream_source` holds a JSON array written with json_encode(),
+		// which escapes forward slashes, so the stored row reads
+		// ["http:\/\/host\/name\/index.m3u8"]. Matching the raw URL against that
+		// could never hit -- every slash differed -- so this returned 0 for
+		// everything, and the "adopt the channel already in the panel" branch in
+		// importStreams() was unreachable: a stream the operator had created by
+		// hand, or one whose link had been lost, got imported again as a
+		// duplicate. Encode the needle the same way the value was written.
+		//
+		// The surrounding quotes matter for a second reason. The RTMP and RTSP
+		// forms carry no suffix after the stream name, so
+		// rtmp://h/static/bandamax is a prefix of rtmp://h/static/bandamax_hd;
+		// anchoring on the closing quote keeps one channel from adopting
+		// another channel's panel stream.
+		$rEncoded = json_encode($rSource);
+
+		if (!is_string($rEncoded)) {
+			return 0;
+		}
+
+		$rNeedle = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $rEncoded) . '%';
 		$db->query('SELECT `id` FROM `streams` WHERE `type` = 1 AND `stream_source` LIKE ? LIMIT 1;', $rNeedle);
 
 		return $db->num_rows() > 0 ? (int) $db->get_row()['id'] : 0;
