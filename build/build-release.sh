@@ -129,8 +129,26 @@ else
   git archive "$BIN_REF" bin | tar -x -C "$STAGE"
 fi
 
-[ -x "$STAGE/bin/php/bin/php" ] || [ -f "$STAGE/bin/php/bin/php" ] || {
-  echo "build-release: binary layer has no bin/php/bin/php" >&2; exit 1; }
+# "no bin/php/bin/php" on its own says nothing about what the layer DOES
+# contain, and on CI the run log is not always reachable, so describe the tree
+# instead of just rejecting it. ::error:: puts it in the run's annotations,
+# which survive even when the log download does not.
+if [ ! -e "$STAGE/bin/php/bin/php" ]; then
+  top=$(ls -A "$STAGE" 2>/dev/null | tr '\n' ' ')
+  if [ -d "$STAGE/bin" ]; then
+    inbin=$(ls -A "$STAGE/bin" 2>/dev/null | tr '\n' ' ')
+  else
+    inbin="(no bin/ directory at all)"
+  fi
+  echo "build-release: binary layer has no bin/php/bin/php" >&2
+  echo "  staged top level: $top" >&2
+  echo "  staged bin/:      $inbin" >&2
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    echo "::error::binary layer has no bin/php/bin/php -- top level: ${top:0:300}"
+    echo "::error::binary layer bin/ contains: ${inbin:0:300}"
+  fi
+  exit 1
+fi
 say "Binary layer: $(find "$STAGE/bin" -type f | wc -l) files, $(du -sh "$STAGE/bin" | cut -f1)"
 
 # ── 1b. Template layer ───────────────────────────────────────────
