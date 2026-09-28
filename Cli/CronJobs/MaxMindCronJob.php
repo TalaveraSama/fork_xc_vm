@@ -74,7 +74,7 @@ class MaxMindCronJob implements CommandInterface {
 			}
 		} else {
 			echo "MaxMind credentials not configured — using GitHub GeoLite2 fallback.\n";
-			$repo = new GitHubReleases(GIT_OWNER, GIT_REPO_UPDATE, $rSettings['update_channel']);
+			$repo = new GitHubReleases(GIT_OWNER_UPDATE, GIT_REPO_UPDATE, $rSettings['update_channel']);
 			$datageolite = $repo->getGeolite();
 			if (is_array($datageolite)) {
 				foreach ($datageolite['files'] as $rFile) {

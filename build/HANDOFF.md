@@ -71,7 +71,7 @@ Confirmed ready for it: upstream still publishes `2.3.9` as a stable release
 with `xc_vm.tar.gz` (174 MB) and `hashes.md5`, and `XC_VM_Binaries` still has
 `29062026` with 7 assets. Both mirrors have something to copy.
 
-## What still comes from Vateron-Media
+## What comes from where
 
 Checked end to end against the code, not assumed.
 
@@ -83,6 +83,8 @@ Checked end to end against the code, not assumed.
 | Distribution binaries | `BINARIES_SOURCES` in `build/install` |
 | In-panel updater | `GIT_OWNER_MAIN` / `GIT_REPO_MAIN` |
 | Binaries refresh from the panel | `GIT_OWNER_BIN` / `GIT_REPO_BIN` |
+| GeoLite2 databases | `GIT_OWNER_UPDATE` / `GIT_REPO_UPDATE` |
+| Proxy-node archive | `GIT_OWNER_PROXY` / `GIT_REPO_PROXY` |
 
 `build/install` used to hardcode `Vateron-Media/XC_VM` for `XC_VM.zip` with no
 alternative, so an install run without a local archive fetched the *unpatched*
@@ -104,37 +106,38 @@ happens, the chosen base is written into the release body under *Provenance* —
 either "Nothing was taken from `Vateron-Media/XC_VM` to produce this release"
 or a blockquote saying the opposite. All four paths were simulated.
 
-**Still upstream, by the original design decision — data, not panel code:**
+**GeoIP and the proxy node — redirected, pending two repositories.**
 
-| Piece | Source | When |
+| Piece | Now reads | Repo must exist |
 | --- | --- | --- |
-| GeoLite2 GeoIP databases | `Vateron-Media/XC_VM_Update` | `cron:maxmind`, also at install |
-| Proxy-node archive | `Vateron-Media/XC_VM_Proxy` | `cron:proxy`, also at install |
+| GeoLite2 GeoIP databases | `GIT_OWNER_UPDATE` / `GIT_REPO_UPDATE` | `TalaveraSama/XC_VM_Update` |
+| Proxy-node archive | `GIT_OWNER_PROXY` / `GIT_REPO_PROXY` | `TalaveraSama/XC_VM_Proxy` |
 
-Both run through the panel's own cron commands at the end of `install`, and
-both are **non-fatal** — `run_command` never raises, so if those repositories
-vanished the install would still complete, just without GeoIP and without a
-local proxy-node archive.
+`AppConfig.php` now owns all four sources per-repo — `GIT_OWNER_MAIN`,
+`GIT_OWNER_BIN`, `GIT_OWNER_UPDATE`, `GIT_OWNER_PROXY` — all pointing at this
+fork. `GIT_OWNER` itself is no longer read by anything.
 
-Mirroring these two is **not** a matter of copying `mirror.yml`. Upstream tags
-them `25.09.26` and `1.0.0` as stable releases, and the panel's updater reads
-this repository through `GitHubReleases` with `version_compare`: a stable
-`25.09.26` sitting next to the panel's `2.3.9` would read as a newer panel and
-the Update button would try to install the GeoIP databases as the panel. That
-is why `binaries-` and `base-` are both prefixed *and* prereleases.
+Mirroring these two was **not** a matter of copying `mirror.yml`. Upstream
+tags them `25.09.26` and `1.0.0` as *stable*, and the panel reads a repository
+through `GitHubReleases`, which filters by channel and compares tags with
+`version_compare`. A stable `25.09.26` published next to the panel's `2.3.9`
+in this repo would read as a newer *panel*, and the Update button would try to
+install the GeoIP databases as the panel. That is why `binaries-` and `base-`
+are both prefixed *and* prereleases — and why these two go to their own repos
+instead, where upstream's tags and flags can be kept byte-for-byte.
 
-Two ways out, neither free:
+`build/data-mirror/` holds the kit, same shape as `build/binaries-mirror/`:
+one `mirror-data.yml` serving both repos (upstream is derived from the
+mirror's own name, and it refuses to run under any other name), a README, and
+`bootstrap.sh` which creates both repositories, installs the workflow and
+starts the first sync. The workflow lives in the mirror repo and publishes
+with that repo's own `GITHUB_TOKEN`, so there is no PAT to create or rotate.
 
-- **Separate mirror repos** — `TalaveraSama/XC_VM_Update` and
-  `TalaveraSama/XC_VM_Proxy`, keeping upstream's tags and stable flags
-  untouched. Then only `AppConfig.php` gains `GIT_OWNER_UPDATE` /
-  `GIT_OWNER_PROXY` and four call sites change. Cleanest, but a session token
-  cannot create repositories — the user has to make the two empty repos first.
-- **Prefixed prereleases in this repo** — `geoip-<tag>`, `proxy-<tag>`. No new
-  repos, but `MaxMindCronJob`, `ProxyArchiveCronJob`, `ProxyArchiveUpdater`
-  and `ServerInstallCommand` all have to stop trusting the stable channel and
-  learn the prefixes, taking the patched-file count from 15 to 19 — on a fork
-  where 12 of 15 already collide with 2.5.3.
+**Order matters.** Run `sh build/data-mirror/bootstrap.sh` *before* this
+branch reaches the panel, or `cron:maxmind` and `cron:proxy` will 404 against
+repositories that do not exist yet. Both failures are non-fatal — GeoIP simply
+stops refreshing — but it is a silent degradation. Setting either constant
+back to `'Vateron-Media'` restores upstream for that one repository.
 
 Everything else naming Vateron-Media is inert: copyright headers, a curl
 User-Agent string in `GitHubReleases.php`, and the `repository` metadata of
@@ -229,7 +232,7 @@ Same rule: do not revert these. All four were verified, not reasoned about.
   calls, and marks the headline count `300+ (list truncated)` when the cap is
   hit.
 
-## This fork modifies fifteen upstream files, not fourteen
+## This fork modifies eighteen upstream files
 
 Established by byte comparison against a clone of upstream 2.3.9, with the two
 corrections a naive diff needs:
@@ -242,7 +245,9 @@ corrections a naive diff needs:
   pointer. Our copy's sha256 matches the pointer's oid exactly: not patched.
 
 The list lives in `.github/patched-upstream-files.txt` and is the single
-source of truth for both workflows. The fifteenth file is
+source of truth for both workflows. It is **18 files** since the GeoIP and
+proxy sources were redirected too; re-measure with the byte comparison above
+rather than trusting this number. The one that the original handoff missed is
 `resources/langs/en.ini`, which the previous handoff missed. It is **not a
 deliberate patch**: the panel appends missing language keys at runtime with
 the key as its own value, and that edit came across when the source was

@@ -45,7 +45,7 @@ class ProxyArchiveUpdater {
 	private string $indexPath;
 
 	/**
-	 * @param GitHubReleases $repo       Client bound to GIT_OWNER / GIT_REPO_PROXY.
+	 * @param GitHubReleases $repo       Client bound to GIT_OWNER_PROXY / GIT_REPO_PROXY.
 	 * @param string|null    $installDir Override the target dir (defaults to bin/install/); for tests.
 	 */
 	public function __construct(GitHubReleases $repo, ?string $installDir = null) {
@@ -135,7 +135,7 @@ class ProxyArchiveUpdater {
 			return $this->result($rVersion, 'skip', null);
 		}
 
-		$rURL = 'https://github.com/' . GIT_OWNER . '/' . GIT_REPO_PROXY . '/releases/download/' . $rVersion . '/' . self::ASSET;
+		$rURL = 'https://github.com/' . GIT_OWNER_PROXY . '/' . GIT_REPO_PROXY . '/releases/download/' . $rVersion . '/' . self::ASSET;
 
 		$rError = null;
 		for ($rAttempt = 1; $rAttempt <= 2; $rAttempt++) {

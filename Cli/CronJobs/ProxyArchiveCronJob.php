@@ -54,7 +54,7 @@ class ProxyArchiveCronJob implements CommandInterface {
 		$rForceLocal = !empty($rSettings['proxy_force_local']);
 		$rForce      = in_array('--force', $rArgs, true);
 
-		$rRepo = new GitHubReleases(GIT_OWNER, GIT_REPO_PROXY, $rSettings['update_channel']);
+		$rRepo = new GitHubReleases(GIT_OWNER_PROXY, GIT_REPO_PROXY, $rSettings['update_channel']);
 		if ($rForce) {
 			// Drop the 30-min releases cache so a just-published release is seen now.
 			$rRepo->clearCache();

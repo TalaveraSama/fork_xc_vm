@@ -41,16 +41,20 @@ migrations/009_add_proxy_cron.sql
 service
 
 
-# --- Only redirect the updater at this fork ---------------------------------
-# GIT_OWNER_MAIN / GIT_OWNER_BIN and the repo names. No behaviour changes, so
-# an upstream release touching these is cheap to re-apply.
+# --- Only redirect the panel at this fork -----------------------------------
+# GIT_OWNER_MAIN / GIT_OWNER_BIN / GIT_OWNER_UPDATE / GIT_OWNER_PROXY and the
+# repo names. No behaviour changes, so an upstream release touching these is
+# cheap to re-apply: swap the owner constant back in and the patch is done.
 
 Cli/Commands/BinariesCommand.php
 Cli/Commands/LbInstallFlow.php
 Cli/Commands/ServerInstallCommand.php
 Cli/Commands/UpdateCommand.php
+Cli/CronJobs/MaxMindCronJob.php
+Cli/CronJobs/ProxyArchiveCronJob.php
 Cli/CronJobs/UpdateCronJob.php
 Core/Config/AppConfig.php
+Core/Proxy/ProxyArchiveUpdater.php
 Infrastructure/Bootstrap/WebApiBootstrap.php
 
 
