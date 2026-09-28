@@ -61,9 +61,20 @@ and what the Update button offers. All three base layers hold the same
 174,180,187 byte archive — upstream's 2.3.9 — because that is the tree this source is
 built from regardless of the number on the front.
 
-Verified installable on all six distributions after being rebuilt at 2.4.0:
-`complete tree after install on: debian_11, debian_12, debian_13, ubuntu_20,
-ubuntu_22, ubuntu_24`, deploy tree 6157 files.
+Verified installable on all six distributions at 2.4.1: `complete tree after
+install on: debian_11, debian_12, debian_13, ubuntu_20, ubuntu_22, ubuntu_24`,
+deploy tree 6157 files, `binaries mirror: binaries-29062026`, and the four
+runtime components the archive leaves to the installer. Same verdict at 2.4.0
+before it.
+
+2.4.1 was published 2026-09-28T08:58:45Z as stable: `xc_vm.tar.gz`
+188,669,954 B, `XC_VM.zip` 187,803,742 B, `hashes.md5` 89 B, and it is what
+`releases/latest` returns. It carries the three faults found on the live
+server -- the doomed binaries retry, the 404ing data crons, and the missing
+GeoLite2 database that killed playback. Cut the usual way: `seed-base-2.4.1`
+(base layer, 174,180,187 B, byte-identical to base-2.4.0), then `2.4.1`, then
+`verify-2.4.1`; both doorbell tags deleted afterwards, the release tags left
+alone.
 
 **The `release: [published]` trigger in `verify-release.yml` never fires for
 our own releases.** GitHub does not start workflows from events raised with
