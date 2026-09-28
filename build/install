@@ -2336,6 +2336,39 @@ if __name__ == "__main__":
             col.OKBLUE,
         )
 
+    # "using default binaries" is inherited from when the release archive
+    # carried a complete bin/. It now ships upstream's skeleton and the
+    # interpreters arrive with the per-distribution tarball, so on a
+    # distribution that has no tarball those branches are followed by a tree
+    # with no php and no nginx -- and the installer would carry on and print a
+    # success banner over a panel that can never start. Whichever branch ran,
+    # the runtime has to be here before going any further.
+    runtime_required = [
+        "bin/php/bin/php",
+        "bin/nginx/sbin/nginx",
+        "bin/nginx_rtmp/sbin/nginx_rtmp",
+    ]
+    runtime_absent = [
+        p for p in runtime_required if not os.path.exists(os.path.join("/home/xc_vm", p))
+    ]
+    if runtime_absent:
+        printc(
+            f"FATAL: {dist_id} {version} has no runtime — missing "
+            + ", ".join(runtime_absent),
+            col.FAIL,
+        )
+        printc(
+            "The release archive ships upstream's bin/ skeleton; the PHP and "
+            "nginx builds are downloaded during the install, per distribution. "
+            "None is published for this one, so the panel would never start.",
+            col.FAIL,
+        )
+        printc(
+            "Supported: Ubuntu 20/22/24 and Debian 11/12/13.",
+            col.FAIL,
+        )
+        sys.exit(1)
+
     ##################################################
     # MariaDB CONFIGURATION                          #
     ##################################################

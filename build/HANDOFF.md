@@ -86,6 +86,38 @@ starts working the next time the fork publishes a higher number. That is the
 desired behaviour, not a gap — and the button is now safe, because it resolves
 to this fork and no longer to upstream's unpatched tree.
 
+**Verified installable, mechanically.** `build/verify-release.py` downloads a
+published release, checks both archives against their published md5, opens
+`XC_VM.zip` and confirms it holds `install` plus the same tarball published
+beside it, extracts the deploy tree and checks the panel entry points are
+present and that no `config.enc`, `install_id` or hmac key came with it, reads
+the shipped `AppConfig.php` to confirm the installed panel will point here and
+not upstream, and then reassembles base + per-distribution tarball exactly the
+way `install` does and asserts the result is a complete runtime. A draft or a
+prerelease fails it, since neither is visible to the updater. Run against
+`2.3.9`:
+
+    complete tree after install on: debian_11, debian_12, debian_13,
+                                    ubuntu_20, ubuntu_22, ubuntu_24
+
+It writes only to a temporary directory and never touches `/home/xc_vm`, so it
+is safe to run on the machine about to be installed:
+
+    build/verify-release.py --tag 2.3.9 --distro all
+
+CI runs it on every published release, and it can be started by pushing a
+`verify-<tag>` tag.
+
+**Those six are the whole supported list.** `install` also claims Ubuntu 18 and
+Rocky/Alma/RHEL/CentOS 8-9, but no tarball is published for any of them — not
+here and not upstream, so this is inherited, not a gap the fork introduced. The
+RHEL branch at least fails loudly. Ubuntu 18 did not: it fell to a branch that
+prints *"using default binaries"* and carries on, wording inherited from when
+the archive shipped a complete `bin/`. With the skeleton it now ships, that
+path ends in a panel with no php and a success banner over it. `install` now
+checks the runtime is actually present after that whole section, whichever
+branch ran, and stops with the supported list if it is not.
+
 **How to cut the next release.** Three tags, in order; each is only a
 doorbell, the version itself still comes from `AppConfig.php`:
 
