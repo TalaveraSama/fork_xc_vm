@@ -20,7 +20,12 @@ on:
       # v2.3.9-flussonic.N here; the public fork tags plain versions, because
       # the in-panel updater compares tags with PHP's version_compare and a
       # text suffix would sort *below* the version it is meant to supersede.
-      - 'v*'
+      #
+      # 'v[0-9]*', not 'v*': the loose form matched every tag beginning with a
+      # v, so pushing 'verify-2.3.9' to start the release check also started a
+      # full build and published a stray prerelease named after it. A version
+      # tag always has a digit after the v.
+      - 'v[0-9]*'
       - '[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
     inputs:
