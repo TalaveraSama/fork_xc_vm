@@ -55,6 +55,22 @@ returns. Its own notes record its provenance: *"Nothing was taken from
 `Vateron-Media/XC_VM` to produce this release."* All three assets resolve
 anonymously (`302` to the CDN without a token), which is what an install needs.
 
+**The redirection is live now, not just configured.** While writing this,
+`resolve_binaries_source()` and `PANEL_SOURCES` were executed verbatim against
+the real API. The fork is first in both lists and, before the releases existed,
+was skipped for having nothing to offer. It no longer is:
+
+    TalaveraSama/fork_xc_vm       -> binaries-29062026
+    Vateron-Media/XC_VM_Binaries  -> 29062026
+    ==> chosen: TalaveraSama/fork_xc_vm @ binaries-29062026
+
+    TalaveraSama/fork_xc_vm   latest=2.3.9  XC_VM.zip present
+    Vateron-Media/XC_VM       latest=2.3.9  XC_VM.zip present
+
+Upstream stays in both lists as a fallback, so deleting the mirror degrades an
+install instead of breaking it — but nothing reaches for it while the fork has
+a release.
+
 **What the archive does and does not carry.** Upstream ships `bin/` as a
 skeleton and so does this release, because it is built from upstream's base
 archive. `redis` and `ffmpeg` are in it; `bin/php/bin/php`, `xcvm_core.so`,
