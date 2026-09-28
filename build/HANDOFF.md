@@ -365,6 +365,20 @@ Note for anyone reading such a log: the long list of `Del <package>` lines is
 `apt-get autoclean` deleting cached `.deb` files. Nothing is uninstalled
 there, however much it looks like it.
 
+**Confirmed fixed on that host.** With the gate in place the run stopped in
+about ten seconds, before the password prompt and before any repository was
+touched, naming both Flussonic packages. After
+`apt-get remove flussonic-transcoder flussonic-transcoder-base` and
+`apt-get install curl libcurl4` (together — 1.24 and 1.29 block each other if
+taken one at a time), `apt-get check` came back clean and **2.4.0 installed
+successfully** on Ubuntu 22.04. So the six-distribution CI verdict now has a
+live install behind it as well.
+
+One cosmetic wart left: `printc` frames each message in a fixed 62-column box
+and the new diagnostics are longer than that, so they overflow their frames.
+Readable, but untidy. Shortening those strings means republishing the archive,
+which is why it was not done mid-install.
+
 ## Faults found in the fork's own CI
 
 Same rule: do not revert these. Every one was verified, not reasoned about.
