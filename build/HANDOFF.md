@@ -1,6 +1,8 @@
 # Handoff
 
-XC_VM 2.3.9 with a Flussonic module, packaged as installable GitHub releases.
+XC_VM 2.4.0 with a Flussonic module, packaged as installable GitHub releases.
+2.4.0 is this fork's own number; the source layer it is built from is
+upstream 2.3.9, which is still their newest stable.
 This is what a fresh session needs to carry on without relearning it.
 
 ## Where things stand
@@ -81,10 +83,33 @@ from the build, not written by hand, so it cannot drift from the artefact.
 
 **The in-panel updater will not offer 2.3.9 to a panel already on 2.3.9.**
 `getLatestVersion()` returns null unless `version_compare($latest, $current,
-'<=')` is false. So this release is for fresh installs; the Update button
-starts working the next time the fork publishes a higher number. That is the
-desired behaviour, not a gap — and the button is now safe, because it resolves
-to this fork and no longer to upstream's unpatched tree.
+'<=')` is false. So that release is for fresh installs — and the button is
+safe either way now, because it resolves to this fork and no longer to
+upstream's unpatched tree.
+
+**2.4.0 is the version that makes the Update button do something.** Bumping
+`XC_VM_VERSION` is the whole trigger: every panel already on 2.3.9 starts
+seeing an update, and it fetches this fork. Three things had to follow the
+number, and all three are one-time structural fixes rather than per-release
+chores:
+
+  * `.github/release-notes.md` hardcoded `2.3.9` in two places. It now carries
+    `@@VERSION@@` and `@@UPSTREAM_VERSION@@`, and `build-release.yml` fails the
+    build if a marker is missing, if a substitution is empty, or if any `@@...@@`
+    survives into the published notes.
+  * `mirror-base.yml` asked upstream for `$VERSION`, which upstream does not
+    have once this fork runs ahead. It now falls back to upstream's newest
+    release, warns which tag it took, and publishes that tag as
+    `upstream-tag.txt` beside the archive — so the panel notes quote the layer
+    actually used rather than whatever upstream publishes on build day.
+  * `watch-upstream.yml` compared the two numbers with string equality, which
+    would have opened a "upstream released 2.3.9 (we ship 2.4.0)" issue every
+    week. It now compares with `sort -V` and stays quiet while this fork leads.
+
+Migrations do not need a hand: `MigrationRunner` applies them by filename, not
+by version, so the bump adds no schema work. The binaries mirror is keyed on
+`binaries-<date>`, not on the version, so `binaries-29062026` still serves
+2.4.0 — only `base-2.4.0` has to be seeded.
 
 **Verified installable, mechanically.** `build/verify-release.py` downloads a
 published release, checks both archives against their published md5, opens

@@ -48,6 +48,15 @@ jobs:
             exit 0
           fi
 
+          # This fork's number can sit ahead of upstream's -- 2.4.0 here while
+          # their newest stable is 2.3.9. Plain inequality then fires every
+          # week about a release already merged in this tree, and a weekly
+          # false alarm is exactly how a real one ends up ignored.
+          if [ "$(printf '%s\n%s\n' "$ours" "$theirs" | sort -V | tail -1)" = "$ours" ]; then
+            echo "Upstream stable $theirs is not newer than $ours." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
           title="Upstream released $theirs (we ship $ours)"
           if gh issue list --state open --search "$title in:title" \
                --json title --jq '.[].title' | grep -qxF "$title"; then

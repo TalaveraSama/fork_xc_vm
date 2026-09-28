@@ -1,4 +1,4 @@
-XC_VM **2.3.9** with the **Flussonic** module built in.
+XC_VM **@@VERSION@@** with the **Flussonic** module built in.
 
 ## Install
 
@@ -84,7 +84,7 @@ lands in `/root/xc_vm-uninstall-<timestamp>/` first.
 It leaves `/etc/sysctl.conf`, the MariaDB server config and the installed
 packages alone, and says so at the end.
 
-## What's different from upstream 2.3.9
+## What's different from upstream @@UPSTREAM_VERSION@@
 
 Everything upstream ships, plus the Flussonic module — and nothing else.
 

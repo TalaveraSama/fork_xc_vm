@@ -81,6 +81,7 @@ jobs:
           version=$(sed -nE "s/.*define\('XC_VM_VERSION', *'([^']+)'\).*/\1/p" \
                     Core/Config/AppConfig.php | head -1)
           echo "panel version $version"
+          echo "panel_version=$version" >> "$GITHUB_OUTPUT"
 
           if git cat-file -e HEAD:bin/php/bin/php 2>/dev/null; then
             echo "args=--bin-ref HEAD" >> "$GITHUB_OUTPUT"
@@ -105,6 +106,17 @@ jobs:
             echo "args=--base-tar $RUNNER_TEMP/xc_vm.tar.gz" >> "$GITHUB_OUTPUT"
             echo "origin=$GITHUB_REPOSITORY @ base-$version" >> "$GITHUB_OUTPUT"
             echo "base archive from this fork: base-$version"
+            # Which upstream version that layer was taken from -- not always
+            # $version, since this fork's numbering can run ahead. Base releases
+            # made before this file existed get the old assumption, which is
+            # exactly what they were built on.
+            gh release download "base-$version" --repo "$GITHUB_REPOSITORY" \
+              --pattern 'upstream-tag.txt' --dir "$RUNNER_TEMP" 2>/dev/null || true
+            if [ -s "$RUNNER_TEMP/upstream-tag.txt" ]; then
+              echo "upstream_version=$(tr -d '\r\n' < "$RUNNER_TEMP/upstream-tag.txt")" >> "$GITHUB_OUTPUT"
+            else
+              echo "upstream_version=$version" >> "$GITHUB_OUTPUT"
+            fi
             ls -la "$RUNNER_TEMP/xc_vm.tar.gz"; exit 0
           fi
 
@@ -219,6 +231,8 @@ jobs:
       - name: Compose release notes
         env:
           BASE_ORIGIN: ${{ steps.base.outputs.origin }}
+          PANEL_VERSION: ${{ steps.base.outputs.panel_version }}
+          UPSTREAM_VERSION: ${{ steps.base.outputs.upstream_version }}
         run: |
           # What the archive carries is a property of the build, not of the
           # template. It used to be asserted in prose - "bundles the full
@@ -247,11 +261,20 @@ jobs:
             } > runtime.md
           fi
           python3 - <<'PY'
-          import pathlib
+          import os, pathlib, re
           body = pathlib.Path('.github/release-notes.md').read_text()
-          runtime = pathlib.Path('runtime.md').read_text().rstrip('\n')
-          assert '@@RUNTIME@@' in body, 'release-notes.md lost its @@RUNTIME@@ marker'
-          pathlib.Path('release-body.md').write_text(body.replace('@@RUNTIME@@', runtime))
+          marks = {
+              '@@RUNTIME@@': pathlib.Path('runtime.md').read_text().rstrip('\n'),
+              '@@VERSION@@': os.environ.get('PANEL_VERSION', ''),
+              '@@UPSTREAM_VERSION@@': os.environ.get('UPSTREAM_VERSION', ''),
+          }
+          for mark, value in marks.items():
+              assert mark in body, f'release-notes.md lost its {mark} marker'
+              assert value, f'nothing to substitute for {mark}'
+              body = body.replace(mark, value)
+          left = sorted(set(re.findall(r'@@[A-Z_]+@@', body)))
+          assert not left, f'unsubstituted markers left in the notes: {left}'
+          pathlib.Path('release-body.md').write_text(body)
           PY
           {
             echo
