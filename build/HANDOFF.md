@@ -326,6 +326,45 @@ and is not. Each was reproduced before being fixed.
 - **`service` sent daemon stderr to `/dev/null`,** which is why both of those
   failed without a trace. It writes to `tmp/logs/boot.log` now.
 
+### apt was already broken, and the installer ground on for ten minutes
+
+Reported from a live Ubuntu 22.04 host that also runs Flussonic. The 2.4.0
+release downloaded, checksummed and unpacked correctly; the install then
+failed with all thirty-eight system packages reported as individually
+"failed", MariaDB uninstallable, and a closing message blaming a dead apt
+mirror. None of that was the cause. `dpkg` had two conflicting Flussonic
+packages installed at once:
+
+    flussonic-transcoder6.1.3 : Breaks: flussonic-transcoder but 23.02.0 is installed
+
+While any installed package has unmet dependencies, **every** `apt-get
+install` fails, including ones this installer never asked for. The state was
+broken before the installer started and `apt --fix-broken install` cannot
+resolve it, because apt will not choose which of two installed packages to
+drop.
+
+Three fixes, all in `build/install`:
+
+  * `assert_package_manager_sane()` runs `apt-get check` before the MariaDB
+    password prompt and before any repository is touched. If apt is broken it
+    attempts one repair, and if that fails it prints the offending lines
+    verbatim and stops. Failing in ten seconds with the real reason beats
+    failing in ten minutes with the wrong one — and it says outright that the
+    package is not at fault, because the log otherwise reads like one.
+  * The conflicting-package removal was the literal string `mysql-server`,
+    which on Ubuntu is not an installed package name. `mysql-server-8.0` and
+    friends stayed, and those are exactly what `mariadb-server` Conflicts:
+    with, so MariaDB could never install on a host that had MySQL. It now
+    asks `dpkg-query` for the installed `mysql-server*` / `mysql-client*`
+    names and removes those.
+  * The final MariaDB diagnosis assumed one cause. It now asks apt whether
+    the problem is a broken state or an unfetchable package and prints the
+    advice that matches.
+
+Note for anyone reading such a log: the long list of `Del <package>` lines is
+`apt-get autoclean` deleting cached `.deb` files. Nothing is uninstalled
+there, however much it looks like it.
+
 ## Faults found in the fork's own CI
 
 Same rule: do not revert these. Every one was verified, not reasoned about.
