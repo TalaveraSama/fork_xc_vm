@@ -39,6 +39,8 @@ Cli/CronJobs/ProxyArchiveCronJob.php
 Core/GeoIP/GeoIPService.php
 Core/Module/ModuleMigrator.php
 Core/Updates/GitHubReleases.php
+Public/Controllers/Admin/EpgViewController.php
+Public/Controllers/Admin/StreamRankController.php
 Public/Views/admin/topbar.php
 migrations/002_add_maxmind_cron.sql
 migrations/008_add_module_updates_cron.sql

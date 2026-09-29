@@ -487,6 +487,48 @@ Worth keeping in mind: with no country resolvable, a line whose `forced_country`
 is set to something other than `ALL` is still denied -- correctly, since the
 claim cannot be verified. Those lines need the database, not just the fix.
 
+### Opening a page with no query string logged a warning
+
+Reported from the live panel:
+
+    [Main Server] WARNING  Undefined array key "period"
+    #0 Public/Controllers/Admin/StreamRankController.php(26): handleError()
+
+`StreamRankController` read its filter as:
+
+    $rPeriod = (RequestManager::getAll()['period'] ?: 'all');
+
+The `?:` looks like it handles the absent key and does not. PHP evaluates the
+left operand first, so reading a key that is not there warns, *then* the
+fallback applies. Reach Stream Rank from the menu -- no `?period=` -- and the
+warning fires on every load. Only `??` suppresses it, and `RequestManager`
+already offers the idiomatic form, `get('period', 'all')`.
+
+The query itself was never wrong. `StatsCronJob` writes exactly
+`today|week|month|all` into `streams_stats.type` and the view's `<select>`
+offers those same four values, so `all` was always the right default. Cosmetic
+noise, not a broken page -- but it recurs on every page load and buries real
+warnings in the log.
+
+`EpgViewController` had the same bug twice, on `page` and `entries`, and is
+reached from the menu the same way. Both now use `get()` with a default that
+reproduces the old arithmetic exactly: `intval(null)` was 0, so `max(0, 1)`
+still gives page 1 and `max(0, default_entries)` still gives the configured
+page size. Stream Rank additionally whitelists the period against those four
+values, so a hand-typed `?period=junk` falls back to `all` instead of querying
+for a type that cannot exist and rendering an empty table with nothing
+selected.
+
+**This pattern is everywhere upstream and was deliberately not swept.** A scan
+found ~1500 unguarded `getAll()['key']` reads, 261 in the admin controllers
+alone. Nearly all are DataTables AJAX endpoints -- `draw`, `start`, `length`,
+`search`, `filter` -- where the browser always sends the key, so they cannot
+warn in practice. Fixing all of them would add hundreds of files to
+`.github/patched-upstream-files.txt`, and every entry there is a file an
+upstream upgrade has to re-apply by hand. The three fixed here are the ones
+reachable by plain navigation. If another surfaces in the log, the fix is one
+line and the file gets added to the manifest.
+
 ## Faults found in the fork's own CI
 
 Same rule: do not revert these. Every one was verified, not reasoned about.
@@ -554,7 +596,7 @@ it dead, and none was visible from reading the files.
   the substitution asserts it is there, so removing it fails the build rather
   than publishing notes with a hole.
 
-## This fork modifies twenty upstream files
+## This fork modifies twenty-two upstream files
 
 Established by byte comparison against a clone of upstream 2.3.9, with the two
 corrections a naive diff needs:
@@ -567,14 +609,17 @@ corrections a naive diff needs:
   pointer. Our copy's sha256 matches the pointer's oid exactly: not patched.
 
 The list lives in `.github/patched-upstream-files.txt` and is the single
-source of truth for both workflows. It is **20 files**: 18 once the GeoIP and
-proxy sources were redirected, plus `Core/Updates/GitHubReleases.php` when the
-binaries updater had to learn that this fork keeps the runtime in a
-`binaries-` prerelease, plus `Core/GeoIP/GeoIPService.php` when a missing
-GeoLite2 database turned out to kill playback outright. Re-measure with the byte comparison above rather than
-trusting this number. The one that the original handoff missed is
-`resources/langs/en.ini`, which the previous handoff missed. It is **not a
-deliberate patch**: the panel appends missing language keys at runtime with
+source of truth for both workflows. It is **22 files**, and it grew one fix at a
+time: 18 once the GeoIP and proxy sources were redirected, plus
+`Core/Updates/GitHubReleases.php` when the binaries updater had to learn that
+this fork keeps the runtime in a `binaries-` prerelease, plus
+`Core/GeoIP/GeoIPService.php` when a missing GeoLite2 database turned out to
+kill playback outright, plus `EpgViewController.php` and
+`StreamRankController.php` for the undefined-key warnings. Re-measure with the
+byte comparison above rather than trusting this number.
+
+The entry the original handoff missed is `resources/langs/en.ini`. It is **not
+a deliberate patch**: the panel appends missing language keys at runtime with
 the key as its own value, and that edit came across when the source was
 captured from the running server. The two appended keys are
 `mass_edit_mags` and `mass_edit_enigmas` — the navbar labels
@@ -582,7 +627,7 @@ captured from the running server. The two appended keys are
 (it defines only the `permission_`-prefixed variants). Harmless, but it is
 drift, and it is now tracked rather than invisible.
 
-Of the other fourteen, seven carry the fixes above and seven only redirect
+Of the other twenty-one, fourteen carry the fixes above and seven only redirect
 `GIT_OWNER_MAIN` / `GIT_OWNER_BIN` and the repo names at this fork. That split
 was re-checked per file and holds.
 
