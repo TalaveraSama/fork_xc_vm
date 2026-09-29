@@ -1559,3 +1559,42 @@ This is the same fault as 2.5.2's signal meter, 2.5.6's busy frontend and
 2.5.8's "running" decryptor: the module knew the answer and the interface
 showed a status code instead. Worth treating as a standing rule — any branch
 that records a reason must also have a path that displays it.
+
+## Newcamd protocol notes (OSCam module-newcamd.c)
+
+Read while diagnosing `rubengt`. Recording it because two of these facts let
+you rule things out from a server log alone.
+
+Session shape: TCP connect, the server sends a **14-byte challenge**, the
+client derives a key and sends `MSG_CLIENT_2_SERVER_LOGIN`, the server answers
+`_ACK` or `_NAK`, the client asks `MSG_CARD_DATA_REQ` and gets `MSG_CARD_DATA`
+carrying the CAID, provider list and serial. Only then does the ECM loop run,
+with `MSG_KEEPALIVE` alongside.
+
+Key derivation happens twice: an initial key from the 14-byte challenge plus
+the pre-shared `ncd_key`, then a session key from `ncd_key` plus the
+**MD5-crypted** password. The key is 14 bytes, which is why `desKey()` insists
+on 28 hex characters — that check is right.
+
+**A server log that names the user proves the DES key is correct.** The
+username travels inside the DES-encrypted login message. If `ncd_key` did not
+match, the server would decrypt garbage and could not print `rubengt`. The
+module's own wording, "a wrong DES key looks exactly like a wrong password",
+is true from the client side and false from the server side: on the server
+they are distinguishable, and this is how.
+
+**The newcamd port is bound to a CAID on the server.** OSCam's port syntax is
+`port = 10011@1802:000000`, and `mk_user_ftab()` resolves the filter as client
+CAID table, then client IDENT, then **server port CAID**. So a client arriving
+on 10011 is talking about CAID 1802 whether it knows it or not — which is the
+argument for setting `caid` on the profile so `buildCommand()` emits
+`-C 1802` rather than falling back to `-c CONAX`.
+
+ECM requests carry SID at bytes 8-9, CAID at 10-11 and PRID at 12-15, so the
+server sees exactly which service is being asked about. A DCW response is 19
+bytes with 16 bytes of control word, or 3 bytes when not found.
+
+Causal note, because it was briefly got wrong: a rejected login is a complete
+and sufficient explanation for "the server never asks for an ECM". The ECM
+loop is downstream of `MSG_CLIENT_2_SERVER_LOGIN_ACK`. No CA-system theory is
+needed until the account exists and the login succeeds.
