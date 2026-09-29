@@ -170,6 +170,17 @@ class DvbDecryptRunner {
 			}
 
 			if (self::isRunning($rID)) {
+				// Alive is not the same as working. A rejected NEWCAMD login
+				// leaves tsdecrypt reconnecting for ever, and calling that
+				// "running" is the same lie as a signal bar reading 0% when
+				// nothing could be measured at all.
+				$rTrouble = self::liveTrouble($rID);
+
+				if ($rTrouble !== null) {
+					self::record($rID, 'error', $rTrouble);
+					$rCounts['failed']++;
+				}
+
 				continue;
 			}
 
@@ -463,6 +474,58 @@ class DvbDecryptRunner {
 	 * @param int $rServiceID Service id.
 	 * @return string
 	 */
+	/**
+	 * Diagnose a tsdecrypt that is running but not actually decrypting.
+	 *
+	 * explainFailure() only ever sees a process that died. The more common
+	 * case is worse: the process lives, the CAMD server rejects every login,
+	 * and the panel cheerfully reports "running" while the channel stays
+	 * black. The raw log tail is always appended, because a guess about which
+	 * signature matched is worth less than what the tool actually printed.
+	 *
+	 * @param int $rServiceID Service id.
+	 * @return string|null Null when nothing looks wrong.
+	 */
+	private static function liveTrouble($rServiceID) {
+		$rPath = self::logPath($rServiceID);
+
+		if (!is_file($rPath)) {
+			return null;
+		}
+
+		$rLog = (string) @shell_exec('tail -n 40 ' . escapeshellarg($rPath));
+
+		if (trim($rLog) === '') {
+			return null;
+		}
+
+		$rTail = ' Last log lines: ' . trim(substr($rLog, -400));
+
+		$rSignatures = [
+			'no such user'  => 'The CAMD server has no such username.',
+			'doesnt exist'  => 'The CAMD server has no such username.',
+			'does not exist' => 'The CAMD server has no such username.',
+			'access denied' => 'The CAMD server denied access to this user.',
+			'login fail'    => 'The CAMD server rejected the login. For NEWCAMD a wrong DES key looks exactly like a wrong password, so check both.',
+			'bad password'  => 'The CAMD server rejected the password.',
+			'rejected'      => 'The CAMD server rejected this client.',
+		];
+
+		foreach ($rSignatures as $rNeedle => $rWhy) {
+			if (stripos($rLog, $rNeedle) !== false) {
+				return $rWhy . $rTail;
+			}
+		}
+
+		// A healthy session connects once and then talks ECM. A tail full of
+		// connection attempts means it is being dropped as fast as it is made.
+		if (preg_match_all('/connect/i', $rLog) >= 8) {
+			return 'tsdecrypt keeps reconnecting to the CAMD server, so the session is being dropped as fast as it is opened.' . $rTail;
+		}
+
+		return null;
+	}
+
 	private static function explainFailure($rServiceID) {
 		$rPath = self::logPath($rServiceID);
 		$rLog  = is_file($rPath) ? (string) @shell_exec('tail -n 20 ' . escapeshellarg($rPath)) : '';

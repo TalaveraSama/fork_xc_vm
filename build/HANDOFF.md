@@ -1438,3 +1438,36 @@ Wiring the CAMD up is not the same as the CAMD working. Once `camd_id` and
 `enc_port` are set, `decrypt_status` moves pending -> running or error, and
 `decrypt_message` carries tsdecrypt's reason. That is where to look next if a
 channel still does not open.
+
+## 2.5.8 — "running" was a lie when tsdecrypt is alive but rejected
+
+With 2.5.7 the chain finally ran end to end: DVBlast -> tsdecrypt -> NEWCAMD.
+The CAMD server's own log showed the node connecting to port 10011 over and
+over and being turned away:
+
+    user rubengt is trying to connect but doesnt exist ! (generic)
+    plain newcamd-client <node ip> rejected (no such user)
+
+The panel said `running` throughout. `explainFailure()` is only consulted when
+tsdecrypt has *died*; a process that stays up and reconnects for ever passes
+`isRunning()`, the watch loop does `continue`, and the status is never
+revisited. So the one case an operator cannot diagnose from the outside was
+also the one case the panel refused to report.
+
+New `liveTrouble()` inspects the log tail of a *running* tsdecrypt each tick.
+It matches known rejection wording (`no such user`, `doesnt exist`, `access
+denied`, `login fail`, `bad password`, `rejected`), and failing that counts
+connection attempts: eight or more in forty lines means the session is being
+dropped as fast as it is opened. The raw tail is always appended, since a
+guess about which signature matched is worth less than what the tool printed.
+Marking the row `error` is non-destructive; nothing is killed or restarted.
+
+Two configuration traps this exposed, both in `dvb_camd`:
+
+* `username` must exist on the CAMD server. Nothing in the module can know
+  that, but the status now says so instead of claiming success.
+* `ca_system` defaults to `CONAX`, and `caSystem()` falls back to `CONAX` for
+  any unrecognised value. A Nagravision carrier (CAID 1802) will never decrypt
+  under that default. Setting `caid` is the better fix: `buildCommand()` emits
+  `-C <caid>` when it is present and only falls back to `-c <ca_system>` when
+  it is empty.
