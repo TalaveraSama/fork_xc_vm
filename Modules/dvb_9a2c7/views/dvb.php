@@ -305,7 +305,11 @@ renderUnifiedLayoutFooter('admin');
 
 			if (!rData.result) {
 				$('#dvb-meter-lock').attr('class', 'badge badge-danger mr-2').text('error');
-				$('#dvb-meter-detail').text(rData.error || 'Unknown error.');
+				var rMsg = rData.error || 'Unknown error.';
+				if (rData.log) {
+					rMsg += '\n\n--- dvbv5-zap said ---\n' + rData.log;
+				}
+				$('#dvb-meter-detail').css('white-space', 'pre-wrap').text(rMsg);
 				return;
 			}
 

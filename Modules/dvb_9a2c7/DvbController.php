@@ -283,7 +283,14 @@ class DvbController {
 		$rResult = DvbScanService::measureSignal($rTransponder, $rAdapter);
 
 		if (!$rResult['status']) {
-			$this->json(['result' => false, 'error' => $rResult['error']]);
+			// Hand back what the tool actually printed. A canned "never locked"
+			// hides the difference between a weak carrier and, say, a frontend
+			// held open by another process, which are opposite problems.
+			$this->json([
+				'result' => false,
+				'error'  => $rResult['error'],
+				'log'    => substr((string) $rResult['log'], -2000),
+			]);
 		}
 
 		$rSignal = $rResult['signal'];

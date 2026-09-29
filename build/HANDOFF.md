@@ -1270,3 +1270,28 @@ Readings land in `signal_strength` / `signal_quality` through the new
 `DvbTransponderService::recordSignal()`, which touches **only** those two
 columns. `recordScan()` would also reset `scan_status` and `scan_message`, i.e.
 erase the failure you are in the middle of diagnosing.
+
+## 2.5.3 — show what the tuner actually said, and a manual bench
+
+The 2.5.2 meter worked and reported `The tuner never locked...`, which is the
+canned text from `explainFailure()`. That message is fine when the carrier is
+genuinely weak and useless when the real cause was, say, a busy frontend: both
+produce the same sentence. `apiSignal()` now also returns the last 2000 bytes
+of raw `dvbv5-zap` output and the meter prints it under the bars.
+
+Added `Modules/dvb_9a2c7/signal-debug.sh`, run on the node holding the card:
+
+    bash signal-debug.sh
+    FREQ=11970000 POL=HORIZONTAL bash signal-debug.sh
+
+It checks the tools, lists `/dev/dvb`, reports whether the frontend is already
+held by another process, dumps `dvb-fe-tool` capabilities, then replays the
+exact panel invocation and walks a ladder of one-variable-at-a-time variations
+until something locks.
+
+The first rung of that ladder is the one that matters most. `buildInitialFile()`
+writes `INNER_FEC` and `MODULATION` straight from the transponder row, so a
+DVB-S2 carrier entered as `2/3` + `PSK/8` will refuse to lock unless those
+happen to be exactly right. A DVB-S2 demodulator reads FEC and modulation out
+of the physical layer header, so `AUTO` for both is strictly better for
+scanning: it cannot be wrong, and forcing a value can.
