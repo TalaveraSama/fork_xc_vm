@@ -1651,3 +1651,25 @@ rewritten to `$rWhy = ...; if ($rWhy !== null)`.
 The likely cause on that node is ownership: `console.php` has been run as root
 several times this session, and `update` does `cp -a`, so parts of
 `/home/xc_vm` can end up root-owned while `cron:dvb` runs as `xc_vm`.
+
+## dvb-verify.sh — pre-flight as the panel user, not as root
+
+`Modules/dvb_9a2c7/dvb-verify.sh` checks everything that has to be true before
+a transponder can go on air, and runs each step through
+`su -s /bin/sh -c … xc_vm`. That detail is the whole point: root can create
+directories and open frontends that `cron:dvb` cannot, so verifying any of
+this as root proves nothing about whether the panel will work.
+
+It checks, in order: that the panel account exists and is **in the `video`
+group** (without it no tuner can be opened, and `explainFailure()` already
+had a branch for the resulting "Permission denied" it could never otherwise
+explain); that the account can write `/home/xc_vm/tmp/cache/dvb`; that
+dvbv5-scan, dvbv5-zap, dvblast and tsdecrypt are installed; which adapters are
+free and which are held, naming the holding process; then it writes the same
+tuning file `buildInitialFile()` produces and runs the same scan command
+`buildCommand()` produces, as the panel user, and reports the services found.
+
+Flags were cross-checked against the module: `-F`, `-O DVBV5`, `-a`, `-f`,
+`-o`, `-l` and a conditional `-S`. Note that grepping `buildCommand()` for
+flags still turns up `-t 2` — that is the comment recording the 2.5.5 bug, not
+code. Easy to misread, as happened once while writing this.
