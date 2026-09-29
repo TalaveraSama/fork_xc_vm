@@ -6,6 +6,7 @@ use XcVm\Core\Http\RequestManager;
 use XcVm\Domain\Bouquet\BouquetService;
 use XcVm\Domain\Stream\CategoryService;
 use XcVm\Module\Dvb\Service\DvbAdapterService;
+use XcVm\Module\Dvb\Service\DvbCamdService;
 use XcVm\Module\Dvb\Service\DvbImportService;
 use XcVm\Module\Dvb\Service\DvbJobService;
 use XcVm\Module\Dvb\Service\DvbScanService;
@@ -137,6 +138,7 @@ class DvbController {
 		$rServices   = $rTransponderID > 0 ? DvbServiceCatalog::forTransponder($rTransponderID) : [];
 		$rCategories = CategoryService::getAllByType('live');
 		$rBouquets   = BouquetService::getAllSimple();
+		$rCamds      = DvbCamdService::enabled();
 		$_TITLE      = 'DVB Services';
 		$_STATUS     = $this->status();
 
@@ -146,6 +148,46 @@ class DvbController {
 
 	/**
 	 * Tuners detected per node.
+	 *
+	 * @return void
+	 */
+	public function camd() {
+		global $db, $language, $rSettings, $rMobile, $rUserInfo, $rPermissions, $rServers, $rThemes, $rHues;
+
+		$rEditID = (int) $this->input('id', 0);
+		$rNotice = '';
+		$rError  = '';
+
+		if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+			$rAction = (string) $this->input('do', 'save');
+
+			if ($rAction === 'delete') {
+				DvbCamdService::delete($rEditID);
+				$rNotice = 'Card server deleted. Any service using it has stopped being decrypted.';
+				$rEditID = 0;
+			} else {
+				$rSaved = DvbCamdService::save($_POST, $rEditID > 0 ? $rEditID : null);
+
+				if ($rSaved['status']) {
+					$rNotice = 'Card server saved.';
+					$rEditID = 0;
+				} else {
+					$rError = $rSaved['error'];
+				}
+			}
+		}
+
+		$rCamds   = DvbCamdService::all();
+		$rEditing = $rEditID > 0 ? DvbCamdService::find($rEditID) : null;
+		$_TITLE   = 'DVB Card Servers';
+		$_STATUS  = $this->status();
+
+		renderUnifiedLayoutHeader('admin', ['_TITLE' => $_TITLE]);
+		include $this->viewsPath . '/dvb_camd.php';
+	}
+
+	/**
+	 * Render the adapter inventory.
 	 *
 	 * @return void
 	 */
@@ -310,6 +352,77 @@ class DvbController {
 
 	/**
 	 * Unlink a service from the channel it created.
+	 *
+	 * @return void
+	 */
+	public function apiCamd() {
+		$rSub = (string) $this->input('sub', '');
+
+		if ($rSub === 'probe') {
+			$rID   = (int) $this->input('id', 0);
+			$rCamd = $rID > 0 ? DvbCamdService::find($rID) : $this->payload();
+
+			if ($rCamd === null) {
+				$this->json(['result' => false, 'error' => 'No such card server.']);
+
+				return;
+			}
+
+			$rResult = DvbCamdService::probe($rCamd);
+
+			$this->json([
+				'result' => $rResult['status'],
+				'error'  => $rResult['status'] ? '' : $rResult['message'],
+				'note'   => $rResult['message'],
+			]);
+
+			return;
+		}
+
+		if ($rSub === 'toggle') {
+			$rCamd = DvbCamdService::find((int) $this->input('id', 0));
+
+			if ($rCamd === null) {
+				$this->json(['result' => false, 'error' => 'No such card server.']);
+
+				return;
+			}
+
+			$rEnabled = empty($rCamd['enabled']) ? 1 : 0;
+
+			DvbCamdService::setEnabled((int) $rCamd['id'], $rEnabled);
+
+			$this->json([
+				'result' => true,
+				'note'   => $rEnabled ? 'Card server enabled.' : 'Card server disabled. Its channels stop being decrypted on the next tick.',
+			]);
+
+			return;
+		}
+
+		$this->json(['result' => false, 'error' => 'Unknown card server action.']);
+	}
+
+	/**
+	 * Assign or clear the CAMD on an imported service.
+	 *
+	 * @return void
+	 */
+	public function apiDecrypt() {
+		$rResult = DvbImportService::assignCamd(
+			(int) $this->input('id', 0),
+			(int) $this->input('camd_id', 0)
+		);
+
+		$this->json([
+			'result' => $rResult['status'],
+			'error'  => $rResult['status'] ? '' : $rResult['message'],
+			'note'   => $rResult['message'],
+		]);
+	}
+
+	/**
+	 * Detach an imported service from its panel channel.
 	 *
 	 * @return void
 	 */

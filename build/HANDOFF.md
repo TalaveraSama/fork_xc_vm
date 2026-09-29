@@ -971,3 +971,56 @@ applying. Check before tagging with:
 Verified across the six distros, `deploy tree: 6174 files`. Carries the dvb
 module (1.1.0) with scanning and DVBlast streaming. The VPS runs 2.4.2, so the
 updater offers it 2.4.5 directly.
+
+### 2.4.6 — NEWCAMD/CS378X descrambling (dvb module 1.2.0)
+
+Encrypted services can now be descrambled in place. `tsdecrypt` sits between
+DVBlast and ffmpeg, pulls the ECMs out of the transport stream, and asks a card
+server for the control words over NEWCAMD or CS378X (camd35 over TCP):
+
+    DVBlast --udp:enc_port--> tsdecrypt --udp:output_port--> ffmpeg
+                                  \-- NEWCAMD/CS378X --> card server
+
+**The two-port design is the load-bearing decision.** `output_port` is always
+what the panel channel reads. Decryption inserts a stage *behind* that address
+instead of replacing it, so assigning or removing a card server never rewrites
+`streams`.`stream_source`. The one-port alternative — channel points at DVBlast
+when clear, at tsdecrypt when encrypted — means every toggle has to rewrite
+every affected channel, and the ones that get missed play silence with nothing
+to explain it.
+
+Things that are not obvious and cost time if rediscovered:
+
+- **DVBlast strips CA tables by default.** `-Y` (ECM) and `-W` (EMM) are added
+  to the command as soon as any service on that carrier is decrypted. Without
+  them tsdecrypt starts cleanly, logs a successful CAMD login, and then never
+  receives a single ECM — which looks like a card entitlement problem and is
+  not. This is also why enabling decryption restarts the transponder.
+- **NEWCAMD needs a 28-hex-character DES key** and the server rejects a wrong
+  key exactly the way it rejects a wrong password. Validated in
+  `DvbCamdService::save()` so the operator finds out at the form, not from a
+  log on another machine. CS378X has no such key, and the field hides itself.
+- **tsdecrypt daemonises itself** with `-d <pidfile>` and writes its own pid
+  file, so unlike DVBlast there is no `setsid ... & echo $!`.
+- **`-s host:port` needs the port spelled out.** The default is 2233, which is
+  the CS378X port; NEWCAMD lines are usually elsewhere.
+- **One process per encrypted service**, because descrambling is per service
+  while tuning is per transponder. A card line with a session cap will notice.
+- Stopping a transponder stops its decryptors first, in the same pass. Waiting
+  for the supervisor would leave them up to a minute on a dead input, each
+  holding a card-server session.
+- Decryptors whose service row was deleted are unreachable by query, so the
+  supervisor sweeps `cw*.pid` in the scratch directory and reaps the orphans.
+
+`tsdecrypt` is not packaged by most distributions and must be built on the
+tuner node (`github.com/gfto/tsdecrypt`). The module reports its absence as a
+message on the service rather than failing silently.
+
+**Schema.** New table `dvb_camd`, and four columns on `dvb_services`
+(`camd_id`, `enc_port`, `decrypt_status`, `decrypt_message`). Because 2.4.5 is
+already published, this ships as `Modules/dvb_9a2c7/migrations/1.2.0.sql` as
+well as in the master `database.sql` — editing only the `CREATE TABLE` would
+leave every already-installed panel without the columns. Master and delta were
+diffed column by column; they agree. Also added the `database_drop.sql` the
+module had been missing since 1.0.0, so uninstalling no longer strands five
+tables.

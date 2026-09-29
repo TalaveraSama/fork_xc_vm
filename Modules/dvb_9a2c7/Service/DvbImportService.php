@@ -57,6 +57,8 @@ class DvbImportService {
 		$rBouquets   = array_map('intval', (array) ($rOptions['bouquets'] ?? []));
 		$rPrefix     = trim((string) ($rOptions['prefix'] ?? ''));
 		$rSkipCrypt  = !empty($rOptions['skip_encrypted']);
+		$rCamdID     = (int) ($rOptions['camd_id'] ?? 0);
+		$rCamd       = ($rCamdID > 0) ? DvbCamdService::find($rCamdID) : null;
 
 		$rImported    = 0;
 		$rSkipped     = 0;
@@ -90,12 +92,20 @@ class DvbImportService {
 				continue;
 			}
 
-			$rPort = self::allocatePort((int) $rTransponder['server_id']);
+			// An encrypted service routed through a CAMD burns two ports: one
+			// for DVBlast to write into and one for tsdecrypt to write out of.
+			// They are reserved together so a half-allocated service can never
+			// reach the config renderer.
+			$rDecrypt = ($rCamd !== null) && !empty($rService['encrypted']);
+			$rPorts   = self::allocatePorts((int) $rTransponder['server_id'], $rDecrypt ? 2 : 1);
 
-			if ($rPort === 0) {
+			if (empty($rPorts)) {
 				$rErrors[] = 'Ran out of UDP ports on server ' . (int) $rTransponder['server_id'] . '.';
 				break;
 			}
+
+			$rPort    = $rPorts[0];
+			$rEncPort = $rDecrypt ? $rPorts[1] : null;
 
 			$rHost   = trim((string) ($rTransponder['output_host'] ?? '')) !== '' ? (string) $rTransponder['output_host'] : '127.0.0.1';
 			$rSource = self::sourceUrl($rHost, $rPort);
@@ -112,10 +122,17 @@ class DvbImportService {
 			self::attachServer($rStreamID, (int) $rTransponder['server_id']);
 
 			self::db()->query(
-				'UPDATE `dvb_services` SET `stream_id` = ?, `output_ip` = ?, `output_port` = ? WHERE `id` = ?;',
+				'UPDATE `dvb_services`
+				 SET `stream_id` = ?, `output_ip` = ?, `output_port` = ?,
+				     `camd_id` = ?, `enc_port` = ?, `decrypt_status` = ?, `decrypt_message` = ?
+				 WHERE `id` = ?;',
 				$rStreamID,
 				$rHost,
 				$rPort,
+				$rDecrypt ? $rCamdID : null,
+				$rEncPort,
+				$rDecrypt ? 'pending' : 'off',
+				$rDecrypt ? 'Waiting for the tuner node to start tsdecrypt.' : null,
 				(int) $rService['id']
 			);
 
@@ -175,7 +192,10 @@ class DvbImportService {
 		}
 
 		self::db()->query(
-			'UPDATE `dvb_services` SET `stream_id` = NULL, `output_ip` = NULL, `output_port` = NULL WHERE `id` = ?;',
+			'UPDATE `dvb_services`
+			 SET `stream_id` = NULL, `output_ip` = NULL, `output_port` = NULL,
+			     `enc_port` = NULL, `decrypt_status` = \'off\', `decrypt_message` = NULL
+			 WHERE `id` = ?;',
 			(int) $rServiceID
 		);
 
@@ -219,11 +239,14 @@ class DvbImportService {
 	 * @param int $rServerID Node id.
 	 * @return int Port, or 0 when exhausted.
 	 */
-	private static function allocatePort($rServerID) {
+	private static function allocatePorts($rServerID, $rCount = 1) {
 		$db = self::db();
 
+		// GREATEST() would return NULL as soon as either column is NULL, which
+		// is the normal case for a free-to-air service, so take the maximum of
+		// the two aggregates instead.
 		$db->query(
-			'SELECT MAX(s.`output_port`) AS `top`
+			'SELECT MAX(s.`output_port`) AS `top_out`, MAX(s.`enc_port`) AS `top_enc`
 			 FROM `dvb_services` s
 			 INNER JOIN `dvb_transponders` t ON t.`id` = s.`transponder_id`
 			 WHERE t.`server_id` = ?;',
@@ -234,12 +257,121 @@ class DvbImportService {
 
 		if ($db->num_rows() === 1) {
 			$rRow = $db->get_row();
-			$rTop = (int) ($rRow['top'] ?? 0);
+			$rTop = max((int) ($rRow['top_out'] ?? 0), (int) ($rRow['top_enc'] ?? 0));
 		}
 
-		$rNext = ($rTop > 0 ? $rTop : (self::BASE_PORT - 1)) + 1;
+		$rNext  = ($rTop > 0 ? $rTop : (self::BASE_PORT - 1)) + 1;
+		$rPorts = [];
 
-		return ($rNext > self::MAX_PORT) ? 0 : $rNext;
+		for ($rIndex = 0; $rIndex < max(1, (int) $rCount); $rIndex++) {
+			if (($rNext + $rIndex) > self::MAX_PORT) {
+				return [];
+			}
+
+			$rPorts[] = $rNext + $rIndex;
+		}
+
+		return $rPorts;
+	}
+
+	/**
+	 * Assign or clear the CAMD on an already imported service.
+	 *
+	 * Assigning one to a service that has no enc_port yet has to find a port
+	 * for it, which is why this lives here next to the allocator rather than
+	 * in the CAMD service.
+	 *
+	 * @param int $rServiceID `dvb_services` id.
+	 * @param int $rCamdID    CAMD id, or 0 to clear.
+	 * @return array{status:bool,message:string}
+	 */
+	public static function assignCamd($rServiceID, $rCamdID) {
+		$rService = DvbServiceCatalog::find((int) $rServiceID);
+
+		if ($rService === null) {
+			return ['status' => false, 'message' => 'That service no longer exists.'];
+		}
+
+		if ((int) $rCamdID <= 0) {
+			DvbDecryptRunner::stop((int) $rService['id']);
+
+			self::db()->query(
+				'UPDATE `dvb_services`
+				 SET `camd_id` = NULL, `decrypt_status` = \'off\', `decrypt_message` = NULL
+				 WHERE `id` = ?;',
+				(int) $rService['id']
+			);
+
+			// enc_port is deliberately left in place. The port is already
+			// reserved for this service and reusing it on the next assignment
+			// is safer than handing it to a different one.
+			self::restreamFor($rService);
+
+			return ['status' => true, 'message' => 'Decryption removed. The channel keeps the same source.'];
+		}
+
+		$rCamd = DvbCamdService::find((int) $rCamdID);
+
+		if ($rCamd === null) {
+			return ['status' => false, 'message' => 'That CAMD server no longer exists.'];
+		}
+
+		$rEncPort = (int) ($rService['enc_port'] ?? 0);
+
+		if ($rEncPort <= 0) {
+			$rTransponder = DvbTransponderService::find((int) $rService['transponder_id']);
+
+			if ($rTransponder === null) {
+				return ['status' => false, 'message' => 'Its transponder is gone.'];
+			}
+
+			$rPorts = self::allocatePorts((int) $rTransponder['server_id'], 1);
+
+			if (empty($rPorts)) {
+				return ['status' => false, 'message' => 'Ran out of UDP ports on this server.'];
+			}
+
+			$rEncPort = $rPorts[0];
+		}
+
+		self::db()->query(
+			'UPDATE `dvb_services`
+			 SET `camd_id` = ?, `enc_port` = ?, `decrypt_status` = \'pending\', `decrypt_message` = ?
+			 WHERE `id` = ?;',
+			(int) $rCamdID,
+			$rEncPort,
+			'Waiting for the tuner node to start tsdecrypt.',
+			(int) $rService['id']
+		);
+
+		// DVBlast has to be told to write to enc_port instead of output_port,
+		// and it only reads its config at startup.
+		self::restreamFor($rService);
+
+		return [
+			'status'  => true,
+			'message' => 'Now decrypting through ' . $rCamd['name'] . '. The channel source is unchanged.',
+		];
+	}
+
+	/**
+	 * Queue a restream of the transponder a service belongs to.
+	 *
+	 * @param array $rService Service row.
+	 * @return void
+	 */
+	private static function restreamFor(array $rService) {
+		$rTransponder = DvbTransponderService::find((int) $rService['transponder_id']);
+
+		if ($rTransponder === null || empty($rTransponder['streaming'])) {
+			return;
+		}
+
+		DvbJobService::enqueue(
+			(int) $rTransponder['server_id'],
+			DvbJobService::TYPE_RESTREAM,
+			(int) $rTransponder['id']
+		);
 	}
 
 	/**

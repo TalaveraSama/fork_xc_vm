@@ -81,7 +81,13 @@ CREATE TABLE IF NOT EXISTS `dvb_transponders` (
   KEY `adapter_id` (`adapter_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 
--- One row per service (channel) seen on a transponder. `stream_id` is the
+-- One row per service (channel) seen on a transponder.
+--
+-- Two ports, not one, when the service is encrypted. `output_port` is always
+-- what the panel channel reads, so assigning or removing a CAMD never rewrites
+-- `streams`.`stream_source`. For a free-to-air service DVBlast writes straight
+-- to `output_port`. For an encrypted one DVBlast writes to `enc_port` and
+-- tsdecrypt sits between the two. `stream_id` is the
 -- panel `streams`.id once the operator imports it. NULL means "found but not
 -- imported". Rows survive a rescan so the link is not lost — `last_seen` is
 -- how you spot a service that has gone off the transponder.
@@ -102,11 +108,44 @@ CREATE TABLE IF NOT EXISTS `dvb_services` (
   `stream_id` int(11) DEFAULT NULL,
   `output_ip` varchar(64) COLLATE utf8_unicode_ci DEFAULT NULL,
   `output_port` int(11) DEFAULT NULL,
+  `camd_id` int(11) DEFAULT NULL,
+  `enc_port` int(11) DEFAULT NULL,
+  `decrypt_status` varchar(16) COLLATE utf8_unicode_ci DEFAULT 'off',
+  `decrypt_message` text COLLATE utf8_unicode_ci,
   `first_seen` int(11) DEFAULT NULL,
   `last_seen` int(11) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `transponder_service` (`transponder_id`,`service_id`),
   KEY `stream_id` (`stream_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
+
+-- One row per CAMD server the tuner node may ask for control words.
+--
+-- This is a CLIENT credential set, not a server: tsdecrypt opens a TCP session
+-- to someone else's card server, sends the ECMs it pulls out of the transport
+-- stream, and gets code words back. NEWCAMD and CS378X (camd35 over tcp, what
+-- OSCam usually speaks) are both available because tsdecrypt speaks both and
+-- supporting the second one costs nothing.
+--
+-- `des_key` only applies to NEWCAMD. It is the 28 hex character key agreed with
+-- the server, and getting it wrong looks exactly like a wrong password.
+CREATE TABLE IF NOT EXISTS `dvb_camd` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `name` varchar(190) COLLATE utf8_unicode_ci DEFAULT NULL,
+  `protocol` varchar(16) COLLATE utf8_unicode_ci NOT NULL DEFAULT 'NEWCAMD',
+  `host` varchar(190) COLLATE utf8_unicode_ci DEFAULT NULL,
+  `port` int(11) NOT NULL DEFAULT 2233,
+  `username` varchar(190) COLLATE utf8_unicode_ci DEFAULT NULL,
+  `password` varchar(190) COLLATE utf8_unicode_ci DEFAULT NULL,
+  `des_key` varchar(64) COLLATE utf8_unicode_ci DEFAULT '0102030405060708091011121314',
+  `ca_system` varchar(32) COLLATE utf8_unicode_ci DEFAULT 'CONAX',
+  `caid` varchar(16) COLLATE utf8_unicode_ci DEFAULT NULL,
+  `emm` tinyint(1) NOT NULL DEFAULT 0,
+  `input_buffer` int(11) NOT NULL DEFAULT 0,
+  `mute_on_error` tinyint(1) NOT NULL DEFAULT 1,
+  `enabled` tinyint(1) NOT NULL DEFAULT 1,
+  `notes` text COLLATE utf8_unicode_ci,
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 
 -- Work queue. The panel inserts, the tuner node's cron consumes. Kept

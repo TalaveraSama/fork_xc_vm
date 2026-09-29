@@ -72,6 +72,18 @@ apt-get install dvb-tools dvblast
 streaming. `dvb-fe-tool` is optional: without it adapters are still discovered,
 they just show up unnamed.
 
+To descramble encrypted services you also need **`tsdecrypt`**, which most
+distributions do not package:
+
+```sh
+apt-get install build-essential git libssl-dev
+git clone https://github.com/gfto/tsdecrypt.git
+cd tsdecrypt && git submodule update --init --recursive && make && make install
+```
+
+It is only needed on the tuner node, and only if you actually have a card
+server. Free-to-air services never touch it.
+
 ### 3. Permissions
 
 The panel runs as `xc_vm`, and DVB device nodes belong to group `video`:
@@ -127,7 +139,7 @@ If that line is missing, `console.php status` rewrites the crontab.
 
 Importing a service does five things:
 
-1. allocates a UDP port on the tuner node;
+1. allocates a UDP port on the tuner node (two, if it is being decrypted);
 2. creates a `streams` row whose source is `udp://127.0.0.1:<port>`;
 3. pins it to the tuner node in `streams_servers`;
 4. marks the transponder as "should be streaming";
@@ -161,6 +173,52 @@ the way an operator says it (1-4) and converts per tool. If you ever drive these
 binaries by hand, getting this wrong gives you a healthy lock on the wrong
 satellite — which looks like a working system showing the wrong channels.
 
+## Decrypting: NEWCAMD and CS378X
+
+Services the scan marked with a padlock carry conditional access. The module can
+descramble them through a card server you already have access to, using
+`tsdecrypt` as the middle stage:
+
+```
+  DVBlast ──udp 127.0.0.1:enc_port──► tsdecrypt ──udp 127.0.0.1:output_port──► ffmpeg
+                                          │
+                                          └── NEWCAMD / CS378X ──► card server
+```
+
+**The channel always reads `output_port`.** That is the point of the two-port
+design. Assigning a card server inserts a stage behind the address the channel
+already uses, and removing one points DVBlast back at it. No `streams` row is
+ever rewritten, so there is no way to end up with a channel quietly pointing at
+a port nothing writes to.
+
+Set the servers up under **Management → Service Setup → DVB Card Servers**, then
+pick one per service on the DVB Services page, or for a whole batch in the
+import form. The padlock column becomes a dropdown once a service is imported.
+
+Three things are worth knowing before you start:
+
+- **NEWCAMD needs a DES key** — 28 hex characters, agreed with whoever runs the
+  server. A wrong key is rejected exactly like a wrong password, so when login
+  fails, suspect both. CS378X (what OSCam exposes by default) has no such key.
+- **One `tsdecrypt` process per encrypted channel.** DVBlast is one process per
+  transponder, but descrambling happens per service. Twenty encrypted channels
+  means twenty processes and twenty card-server sessions, which a line with a
+  session limit will notice.
+- **The ECM streams have to survive the remux.** DVBlast strips conditional
+  access tables by default; the module adds `-Y -W` as soon as any service on
+  that carrier is being decrypted. Nothing to configure, but it explains why
+  enabling decryption restarts the transponder.
+
+If a channel is black, the **Decrypt** column carries the state and the reason:
+`running`, `pending` (queued, waiting for the next cron tick), or `error` with
+the message hovering over the badge. The common ones are a refused connection
+(host or port wrong), a rejected login (password or DES key), and a valid login
+that never receives a control word (the card is not entitled to that service).
+
+By default a channel with no valid control word outputs **nothing** rather than
+scrambled noise. A black channel gets diagnosed; digital mush gets blamed on the
+encoder. You can turn that off per card server.
+
 ## Tables
 
 | Table | Holds |
@@ -168,8 +226,10 @@ satellite — which looks like a working system showing the wrong channels.
 | `dvb_adapters` | frontends found on each node |
 | `dvb_transponders` | what the operator defined |
 | `dvb_services` | what scanning found, and the panel stream each maps to |
+| `dvb_camd` | card servers available for descrambling |
 | `dvb_jobs` | the panel → tuner-node work queue |
 
-Uninstalling drops only the module's cron row. Imported channels are left
-alone: by then they are ordinary panel streams, and deleting a subscriber-facing
-line-up on uninstall would be destructive.
+Uninstalling drops those five tables and the module's cron row. Imported
+channels are left alone: by then they are ordinary panel streams, and deleting a
+subscriber-facing line-up on uninstall would be destructive. They simply stop
+receiving data once DVBlast is gone.

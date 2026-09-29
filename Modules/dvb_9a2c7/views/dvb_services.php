@@ -89,6 +89,21 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 												</div>
 											</div>
 										</div>
+										<div class="form-group col-md-3">
+											<label>Decrypt with</label>
+											<select id="import_camd" class="form-control">
+												<option value="0">Do not decrypt</option>
+												<?php foreach ($rCamds as $rCamdID => $rCamd): ?>
+													<option value="<?php echo (int) $rCamdID; ?>">
+														<?php echo htmlspecialchars((string) $rCamd['name'], ENT_QUOTES); ?>
+													</option>
+												<?php endforeach; ?>
+											</select>
+											<small class="text-muted">
+												Applied to the encrypted services in the selection. Uncheck &ldquo;Skip
+												encrypted&rdquo; as well, or they are never imported in the first place.
+											</small>
+										</div>
 									</div>
 									<button type="button" class="btn btn-danger" onclick="dvbImport();">
 										<i class="mdi mdi-import mr-1"></i>Import selected
@@ -110,6 +125,7 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 											<th class="text-center">Video PID</th>
 											<th class="text-center">Audio PID</th>
 											<th class="text-center">CA</th>
+											<th>Decrypt</th>
 											<th class="text-center">Channel</th>
 											<th>Output</th>
 											<th class="text-center"></th>
@@ -133,6 +149,32 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 														<i class="mdi mdi-lock text-warning" title="Carries conditional access — you need a CAM to watch it"></i>
 													<?php else: ?>
 														<i class="mdi mdi-lock-open text-success" title="Free to air"></i>
+													<?php endif; ?>
+												</td>
+												<td>
+													<?php if ($rLinked && !empty($rRow['encrypted'])): ?>
+														<select class="form-control form-control-sm dvb-camd-pick" data-id="<?php echo (int) $rRow['id']; ?>">
+															<option value="0">&mdash; none &mdash;</option>
+															<?php foreach ($rCamds as $rCamdID => $rCamd): ?>
+																<option value="<?php echo (int) $rCamdID; ?>" <?php echo ((int) $rRow['camd_id'] === (int) $rCamdID) ? 'selected' : ''; ?>>
+																	<?php echo htmlspecialchars((string) $rCamd['name'], ENT_QUOTES); ?>
+																</option>
+															<?php endforeach; ?>
+														</select>
+														<?php
+														$rState = (string) ($rRow['decrypt_status'] ?? 'off');
+														$rBadge = ['running' => 'success', 'pending' => 'info', 'error' => 'danger'];
+														?>
+														<?php if ($rState !== 'off' && $rState !== ''): ?>
+															<small class="badge badge-<?php echo $rBadge[$rState] ?? 'secondary'; ?> mt-1"
+																title="<?php echo htmlspecialchars((string) ($rRow['decrypt_message'] ?? ''), ENT_QUOTES); ?>">
+																<?php echo htmlspecialchars($rState, ENT_QUOTES); ?>
+															</small>
+														<?php endif; ?>
+													<?php elseif (!empty($rRow['encrypted'])): ?>
+														<small class="text-muted">import it first</small>
+													<?php else: ?>
+														<span class="text-muted">&mdash;</span>
 													<?php endif; ?>
 												</td>
 												<td class="text-center">
@@ -204,6 +246,7 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 			bouquets: $('#import_bouquets').val() || [],
 			prefix: $('#import_prefix').val(),
 			skip_encrypted: $('#import_skip_encrypted').is(':checked') ? 1 : 0,
+			camd_id: $('#import_camd').val(),
 			start: $('#import_start').is(':checked') ? 1 : 0
 		}, function(rData) {
 			if (rData.error) {
@@ -215,6 +258,23 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 			}, 1500);
 		}, 'json');
 	}
+
+	$(function() {
+		$('.dvb-camd-pick').on('change', function() {
+			var select = $(this);
+
+			$.post('./api?action=dvb_decrypt', {
+				id: select.data('id'),
+				camd_id: select.val()
+			}, function(rData) {
+				dvbNotify(rData.note || rData.error);
+
+				// The state badge is written by the tuner node, not here, so a
+				// reload is the only honest way to show what actually happened.
+				setTimeout(function() { location.reload(); }, 1200);
+			}, 'json');
+		});
+	});
 
 	function dvbUnlink(rID) {
 		if (!confirm('Unlink this service from its channel? The channel itself is kept.')) {

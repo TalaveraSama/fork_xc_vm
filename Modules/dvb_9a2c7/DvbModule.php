@@ -10,6 +10,8 @@ use XcVm\Core\Module\NavbarItem;
 use XcVm\Core\Module\NavbarRegistry;
 use XcVm\Infrastructure\Database\DatabaseFactory;
 use XcVm\Module\Dvb\Service\DvbAdapterService;
+use XcVm\Module\Dvb\Service\DvbCamdService;
+use XcVm\Module\Dvb\Service\DvbDecryptRunner;
 use XcVm\Module\Dvb\Service\DvbImportService;
 use XcVm\Module\Dvb\Service\DvbJobService;
 use XcVm\Module\Dvb\Service\DvbScanService;
@@ -83,6 +85,8 @@ class DvbModule extends BaseModule {
 
 			if ($rDb !== null && DatabaseFactory::get() === null) {
 				DvbAdapterService::setDb($rDb);
+				DvbCamdService::setDb($rDb);
+				DvbDecryptRunner::setDb($rDb);
 				DvbJobService::setDb($rDb);
 				DvbImportService::setDb($rDb);
 				DvbScanService::setDb($rDb);
@@ -123,6 +127,9 @@ class DvbModule extends BaseModule {
 			$r->get('adapters', [DvbController::class, 'adapters'], [
 				'permission' => ['adv', 'streams'],
 			]);
+			$r->any('camd', [DvbController::class, 'camd'], [
+				'permission' => ['adv', 'streams'],
+			]);
 		});
 
 		$router->api('dvb_discover', [DvbController::class, 'apiDiscover'], [
@@ -146,6 +153,12 @@ class DvbModule extends BaseModule {
 		$router->api('dvb_stream', [DvbController::class, 'apiStream'], [
 			'permission' => ['adv', 'streams'],
 		]);
+		$router->api('dvb_camd', [DvbController::class, 'apiCamd'], [
+			'permission' => ['adv', 'streams'],
+		]);
+		$router->api('dvb_decrypt', [DvbController::class, 'apiDecrypt'], [
+			'permission' => ['adv', 'add_stream'],
+		]);
 	}
 
 	/**
@@ -166,6 +179,10 @@ class DvbModule extends BaseModule {
 		$registry->add((new NavbarItem('content.streams.dvb'))
 			->parent('content.streams')->url('dvb_services')
 			->label('', 'DVB Services')->permissions(['streams'])->order(62));
+
+		$registry->add((new NavbarItem('management.service_setup.dvb_camd'))
+			->parent('management.service_setup')->url('dvb_camd')
+			->label('', 'DVB Card Servers')->permissions(['streams'])->order(83));
 	}
 
 	/**

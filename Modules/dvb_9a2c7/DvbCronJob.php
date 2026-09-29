@@ -5,6 +5,7 @@ namespace XcVm\Module\Dvb;
 use XcVm\Cli\CommandInterface;
 use XcVm\Core\Process\ProcessManager;
 use XcVm\Module\Dvb\Service\DvbAdapterService;
+use XcVm\Module\Dvb\Service\DvbDecryptRunner;
 use XcVm\Module\Dvb\Service\DvbJobService;
 use XcVm\Module\Dvb\Service\DvbScanService;
 use XcVm\Module\Dvb\Service\DvbServiceCatalog;
@@ -264,6 +265,10 @@ class DvbCronJob implements CommandInterface {
 			$rTransponder = ['id' => $rID, 'adapter_id' => null];
 		}
 
+		// Decryptors first: they read from DVBlast, so tearing down the source
+		// before its consumers just leaves them spinning on a dead socket.
+		DvbDecryptRunner::stopForTransponder($rID);
+
 		$rResult = DvbStreamRunner::stop($rTransponder);
 		DvbStreamRunner::record($rID, 'stopped', 'Stopped by request.');
 
@@ -288,6 +293,20 @@ class DvbCronJob implements CommandInterface {
 				$rCounts['started'],
 				$rCounts['stopped'],
 				$rCounts['failed']
+			);
+		}
+
+		// Decryptors are reconciled after the tuners, not before: tsdecrypt
+		// reads what DVBlast produces, so starting one for a transponder that
+		// is still coming up just burns a CAMD session on a dead input.
+		$rCrypt = DvbDecryptRunner::supervise($rServerID);
+
+		if ($rCrypt['started'] || $rCrypt['stopped'] || $rCrypt['failed']) {
+			echo sprintf(
+				"[dvb] decryptors: %d started, %d stopped, %d failed\n",
+				$rCrypt['started'],
+				$rCrypt['stopped'],
+				$rCrypt['failed']
 			);
 		}
 	}
