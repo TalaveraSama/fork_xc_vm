@@ -34,6 +34,7 @@
 
 Cli/Commands/BinariesCommand.php
 Cli/Commands/StatusCommand.php
+Cli/Commands/UpdateCommand.php
 Cli/CronJobs/MaxMindCronJob.php
 Cli/CronJobs/ProxyArchiveCronJob.php
 Core/GeoIP/GeoIPService.php
@@ -53,14 +54,13 @@ service
 # repo names. No behaviour changes, so an upstream release touching these is
 # cheap to re-apply: swap the owner constant back in and the patch is done.
 #
-# BinariesCommand, MaxMindCronJob and ProxyArchiveCronJob used to live here.
-# They moved up: pointing the constants at this fork changed the *shape* of the
-# repositories they talk to, and the code had to learn that shape. Re-applying
-# them is no longer a constant swap.
+# BinariesCommand, MaxMindCronJob, ProxyArchiveCronJob and UpdateCommand used
+# to live here. They moved up: pointing the constants at this fork changed the
+# *shape* of the repositories they talk to, and the code had to learn that
+# shape. Re-applying them is no longer a constant swap.
 
 Cli/Commands/LbInstallFlow.php
 Cli/Commands/ServerInstallCommand.php
-Cli/Commands/UpdateCommand.php
 Cli/CronJobs/UpdateCronJob.php
 Core/Config/AppConfig.php
 Core/Proxy/ProxyArchiveUpdater.php

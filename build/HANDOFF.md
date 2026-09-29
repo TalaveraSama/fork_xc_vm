@@ -593,6 +593,32 @@ Three details worth keeping:
 URL it was started with, so changing the protocol or token appeared to do
 nothing until each channel was restarted by hand.
 
+### `console.php update` did nothing, silently, and exited 0
+
+Found while telling the operator how to update from the shell. The command
+printed not one line and returned success; the panel stayed on the old
+version. `execute()` opened with:
+
+    if (empty($rArgs[0])) {
+        return 0;
+    }
+
+and `CommandRegistry::dispatch()` does `array_slice($rArgv, 2)` -- the
+command name is already consumed, so `console.php update` arrives with an
+empty array and takes that return. The sub-command has to be repeated:
+`RootSignalsCronJob.php:551` (which is what the panel's Update button ends
+up running) issues `console.php update update`, and the python updater
+issues `console.php update post-update`.
+
+So the button always worked and only the hand-typed form was dead -- the
+worst possible split, because the shell is where you go when the button
+looks stuck, and it answers with silence and exit 0, which reads exactly
+like "already up to date".
+
+`$rArgs[0] ?? 'update'` now defaults the bare form to the main action, and
+an unrecognised sub-command reports itself on stderr and returns 1 instead
+of falling off the end of the switch into `return 0`.
+
 ## Faults found in the fork's own CI
 
 Same rule: do not revert these. Every one was verified, not reasoned about.
@@ -691,7 +717,7 @@ captured from the running server. The two appended keys are
 (it defines only the `permission_`-prefixed variants). Harmless, but it is
 drift, and it is now tracked rather than invisible.
 
-Of the other twenty-one, fourteen carry the fixes above and seven only redirect
+Of the other twenty-one, fifteen carry the fixes above and six only redirect
 `GIT_OWNER_MAIN` / `GIT_OWNER_BIN` and the repo names at this fork. That split
 was re-checked per file and holds.
 
