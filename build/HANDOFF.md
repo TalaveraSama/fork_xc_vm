@@ -1060,3 +1060,40 @@ compile through to `libtsfuncs.a`, and the build stops only at
 `install-tuner-node.sh` and `FFdecsa_init` are 100755 in the index, and the
 vendored `.gitignore` files exclude only build artefacts (128 files on disk,
 128 in the index).
+
+### 2.4.8 — proxy archive downloaded from the wrong mirror
+
+Found in a real install log on Ubuntu 20.04. The panel listed the release from
+one owner and then downloaded the asset from another:
+
+    Mirror TalaveraSama/XC_VM_Proxy unusable: Resource not found (404)
+    Fetching releases for Vateron-Media/XC_VM_Proxy ... Retrieved 1 releases
+    Retrieved MD5 hash for proxy.tar.gz in version 1.0.0
+    [ERROR] proxy.tar.gz: download failed ... 404 for
+            https://github.com/TalaveraSama/XC_VM_Proxy/releases/download/1.0.0/proxy.tar.gz
+
+`GitHubReleases::locate()` walks a list of owners and returns an instance bound
+to whichever one answered. Every lookup in `ProxyArchiveUpdater` followed that
+instance — including `getAssetHash()`, which is why a valid md5 was reported —
+except the download URL on line 138, which hardcoded `GIT_OWNER_PROXY`. So on
+any panel where the fork mirror does not exist, the proxy archive could never
+be fetched, and the error blamed a repository that had already been reported
+unusable two lines earlier.
+
+The constructor of `GitHubReleases` already warns about exactly this hazard
+("a cache shared between them would serve one owner's tag list while the
+download URLs are built from another") — the cache was keyed by owner to avoid
+it, and then the URL builder reintroduced it.
+
+Fix: `getOwner()` and `getRepoName()` accessors on `GitHubReleases`, and
+`ProxyArchiveUpdater` asks the resolved instance. Verified both directions --
+fork mirror present keeps the old URL, fork mirror absent now resolves to
+upstream. Confirmed live: the upstream URL answers 302 and the one from the log
+answers 404.
+
+`MaxMindCronJob` is the only other `locate()` caller and was never affected: it
+delegates to `$repo->getGeolite()`, which builds its URLs from `$this->owner`.
+That is why GeoIP downloaded fine in the same install while the proxy did not.
+
+This disappears entirely once `TalaveraSama/XC_VM_Proxy` exists and is public,
+but the fallback has to work regardless — that is what it is for.

@@ -56,6 +56,30 @@ class GitHubReleases {
     }
 
     /**
+     * Owner this instance actually resolved to.
+     *
+     * locate() walks a list of owners and returns an instance bound to the
+     * first one that served a release, which is not necessarily the first one
+     * asked for. Callers that build their own download URLs must ask here
+     * rather than reuse the GIT_OWNER_* constant they passed in, or they list
+     * a release from one owner and try to download it from another.
+     *
+     * @return string Repository owner.
+     */
+    public function getOwner(): string {
+        return $this->owner;
+    }
+
+    /**
+     * Repository name this instance is bound to.
+     *
+     * @return string Repository name.
+     */
+    public function getRepoName(): string {
+        return $this->repo;
+    }
+
+    /**
      * Clear the cached release data by deleting the cache file.
      */
     public function clearCache(): void {
