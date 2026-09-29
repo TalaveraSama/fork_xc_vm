@@ -965,3 +965,9 @@ applying. Check before tagging with:
 
     find Modules migrations -name '*.sql' -exec \
       awk '/^[[:space:]]*--/ && /;/ {print FILENAME":"FNR}' {} +
+
+**2.4.5 is current.** Stable, `releases/latest`, published 2026-09-29T03:44:23Z.
+`xc_vm.tar.gz` 188,711,281 B, `XC_VM.zip` 187,842,770 B, `hashes.md5` 89 B.
+Verified across the six distros, `deploy tree: 6174 files`. Carries the dvb
+module (1.1.0) with scanning and DVBlast streaming. The VPS runs 2.4.2, so the
+updater offers it 2.4.5 directly.
