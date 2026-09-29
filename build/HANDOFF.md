@@ -1832,3 +1832,35 @@ assign a CAMD anyway if the picture is scrambled.
 
 Same shape as 2.5.2, 2.5.6, 2.5.8 and 2.6.0: the module preferred its own
 inference to what it had been told, and said nothing when the two disagreed.
+
+## Conclusion of the decryption investigation: the account, not the code
+
+The differential test settled it. Running tsdecrypt against the captured mux
+with `-C 0x1802 -M 271`:
+
+* service 271 found in the PAT, PMT parsed
+* card reports CAID 0x1802, tsdecrypt selects ECM CAID 0x1802
+* ECM PID 0x0acc, which is the 0x1802 descriptor in *that service's* PMT
+* a real ECM payload is sent
+* the server answers "Card was not able to decode the channel"
+
+And the same server's log, captured earlier, shows another account served for
+exactly that service:
+
+    (ecm) celestedeco (1802@000000/0000/010F/...): cache3 (1660 ms) by gtmediaserver
+
+`010F` is 271. Same server, same CAID, same provider, same service: one
+account gets a control word in 1.6 s, the other does not. Every client-side
+variable is now controlled, so the remaining difference is the account.
+
+One more detail worth keeping. Each failure takes **exactly three seconds**,
+and the OSCam web interface showed `3000` on that user's row. A card that
+rejects an ECM answers immediately; a flat three-second gap is a timer
+expiring because nothing served the request. In OSCam that is what happens
+when no reader in the user's group can supply the CAID — so the first thing
+to check is the account's `group` against the reader's, then `caid`/`ident`,
+then any `services` filter.
+
+Nothing in this module needs to change for it. The panel side is complete:
+set `caid` to `1802` on the CAMD profile and, once the account is fixed,
+assigning the CAMD is the only remaining step.
