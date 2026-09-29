@@ -303,7 +303,14 @@ routes 1 and 2 are now both dead ends here — the fork has a single commit and
 no `bin/` anywhere — so **route 3 is the only one**, which is why running the
 base mirror before the build is not optional.
 
-## 2.4.3 is current
+## 2.4.4 is current
+
+Published 2026-09-29, stable, and what `releases/latest` returns:
+`xc_vm.tar.gz` 188,676,551 B, `XC_VM.zip` 187,802,605 B, `hashes.md5` 89 B.
+Verified installing on debian_11/12/13 and ubuntu_20/22/24, deploy tree 6157
+files. Adds the Watch Folder cron schedule to everything in 2.4.3.
+
+## 2.4.3
 
 Published 2026-09-29, stable, and what `releases/latest` returns:
 `xc_vm.tar.gz` 188,671,332 B, `XC_VM.zip` 187,804,980 B, `hashes.md5` 89 B.
