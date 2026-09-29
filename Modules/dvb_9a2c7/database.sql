@@ -14,7 +14,7 @@
 -- module hook in InternalApiController to add one to anyway.
 
 -- One row per DVB frontend found on a streaming node. Refreshed by the
--- `discover` job; rows are never deleted automatically so that a transponder
+-- `discover` job. Rows are never deleted automatically, so that a transponder
 -- pinned to adapter 3 keeps its binding across a reboot that renumbers nothing.
 CREATE TABLE IF NOT EXISTS `dvb_adapters` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS `dvb_transponders` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 
 -- One row per service (channel) seen on a transponder. `stream_id` is the
--- panel `streams`.id once the operator imports it; NULL means "found but not
+-- panel `streams`.id once the operator imports it. NULL means "found but not
 -- imported". Rows survive a rescan so the link is not lost — `last_seen` is
 -- how you spot a service that has gone off the transponder.
 CREATE TABLE IF NOT EXISTS `dvb_services` (

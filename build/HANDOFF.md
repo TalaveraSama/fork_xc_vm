@@ -954,3 +954,14 @@ after the tuner node reboots.
 Ports are allocated monotonically per node from 10000 and never reused: a dying
 DVBlast still writing to a reclaimed port would briefly show the old channel on
 a new one.
+
+**Build gate that caught 2.4.5 on the first attempt.** `build-release.sh`
+rejects any `--` SQL comment containing a semicolon, because a naive statement
+splitter cuts there and glues the comment's tail onto the next statement. Two
+prose comments in the dvb schema tripped it ("...`discover` job; rows are..."
+and "...imports it; NULL means..."). Reword rather than suppress: the gate is
+right, and it is the same fault that once stopped the flussonic schema from
+applying. Check before tagging with:
+
+    find Modules migrations -name '*.sql' -exec \
+      awk '/^[[:space:]]*--/ && /;/ {print FILENAME":"FNR}' {} +
