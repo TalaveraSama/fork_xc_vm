@@ -2,6 +2,7 @@
 
 namespace XcVm\Module\Flussonic\Service;
 
+use XcVm\Core\Http\ApiClient;
 use XcVm\Domain\Bouquet\BouquetService;
 use XcVm\Domain\Stream\StreamProcess;
 use XcVm\Domain\Stream\StreamRepository;
@@ -212,6 +213,7 @@ class FlussonicSyncService {
 			}
 
 			StreamProcess::updateStreams($rResult['stream_ids']);
+			self::startPanelStreams($rResult['stream_ids'], !empty($rServer['direct_source']));
 		}
 
 		return $rResult;
@@ -250,9 +252,73 @@ class FlussonicSyncService {
 
 		if ($rUpdated !== []) {
 			StreamProcess::updateStreams($rUpdated);
+			// The source URL changed underneath a process that is already
+			// running: it keeps pulling the old URL until it is restarted, so
+			// "refresh sources" would appear to do nothing.
+			self::startPanelStreams($rUpdated, !empty($rServer['direct_source']));
 		}
 
 		return count($rUpdated);
+	}
+
+	/**
+	 * Start the panel channels this module just created or repointed.
+	 *
+	 * The import used to end at StreamProcess::updateStreams(), which only
+	 * pushes the new configuration into the cache: it refreshes streams that
+	 * are *already* running, and returns immediately without doing anything
+	 * when `enable_cache` is off. Nothing in the import path ever started the
+	 * process, so a freshly imported channel sat idle in the list until an
+	 * operator opened it and pressed Restart by hand.
+	 *
+	 * This issues the same call the panel's own Start/Restart button makes
+	 * (see the mass-action handler in Public/Views/admin/api.php): one request
+	 * per server, which Public/admin/api.php fans out to that server's internal
+	 * API as `function=start`, landing in StreamProcess::startMonitor().
+	 * Grouping by server matters -- omitting `servers` makes the panel
+	 * broadcast the start to every server it knows, including ones that were
+	 * never given a `streams_servers` row for these channels.
+	 *
+	 * @param int[] $rStreamIDs    Panel stream ids to start.
+	 * @param bool  $rDirectSource Server hands the origin URL straight to clients.
+	 * @return void
+	 */
+	private static function startPanelStreams(array $rStreamIDs, bool $rDirectSource): void {
+		// A direct_source channel is served to the client as the Flussonic URL
+		// itself, so there is no local ffmpeg to start. StreamProcess::startStream()
+		// selects `WHERE direct_source = 0` and would silently match nothing.
+		if ($rDirectSource || $rStreamIDs === []) {
+			return;
+		}
+
+		// Group by the servers actually recorded in `streams_servers` rather
+		// than by the server list the import was told to use. They usually
+		// agree, but not when attachServers() skipped a row, when the operator
+		// moved the channel afterwards, or when `target_server_id` still names
+		// a server that has since been deleted -- and Public/admin/api.php
+		// indexes $rAllServers by that id without checking it exists.
+		$rMap = [];
+		$db = self::db();
+		$db->query(
+			'SELECT `stream_id`, `server_id` FROM `streams_servers` WHERE `stream_id` IN (' .
+				implode(',', array_map('intval', $rStreamIDs)) . ');'
+		);
+
+		foreach ($db->get_rows() as $rRow) {
+			$rMap[(int) $rRow['server_id']][] = (int) $rRow['stream_id'];
+		}
+
+		foreach ($rMap as $rServerID => $rIDs) {
+			// The receiving end sleeps 50 ms between streams, so a bulk import
+			// comfortably outruns ApiClient's 5 s default and the batch would be
+			// cut off part way through.
+			ApiClient::request([
+				'action'     => 'stream',
+				'sub'        => 'start',
+				'stream_ids' => $rIDs,
+				'servers'    => [$rServerID],
+			], min(120, max(15, (int) ceil(count($rIDs) * 0.25))));
+		}
 	}
 
 	/**

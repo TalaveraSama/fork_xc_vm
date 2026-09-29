@@ -49,6 +49,11 @@ Xtream API and the streaming pipeline. Each imported channel gets
 - `tv_archive_duration` derived from the stream's DVR depth,
 - a `notes` line recording which origin and stream it came from.
 
+The channel is then **started**, one request per streaming server that was
+given a `streams_servers` row, exactly as the panel's own Start button does.
+Origins imported with **Direct Source** on are skipped: the client is handed
+the Flussonic URL itself, so there is no local process to start.
+
 Imports are idempotent: a catalogue row remembers the panel stream it created,
 and a stream whose URL is already in the panel is adopted instead of
 duplicated.
@@ -81,7 +86,9 @@ The protocol is chosen per server in the UI — nothing is hardcoded.
 
 A static playback token, when set, is appended as `?token=…`. Changing the
 protocol (or host/token) and then running **Refresh source URLs** rewrites the
-`stream_source` of every channel already imported from that origin.
+`stream_source` of every channel already imported from that origin, and
+restarts them -- a running process holds the URL it was started with, so
+without the restart the new address would not take effect.
 
 ---
 

@@ -529,6 +529,54 @@ upstream upgrade has to re-apply by hand. The three fixed here are the ones
 reachable by plain navigation. If another surfaces in the log, the fix is one
 line and the file gets added to the manifest.
 
+### Imported Flussonic channels were created but never started
+
+Reported from the live panel: import a stream from a Flussonic origin and
+it appears in the list but does not run, until the operator opens it and
+presses Restart.
+
+`FlussonicSyncService::importStreams()` ended with:
+
+    StreamProcess::updateStreams($rResult['stream_ids']);
+
+which reads as "tell the servers about these streams" and is not that.
+`updateStreams()` inserts an `update_streams` **cache signal** -- it
+refreshes the configuration of streams that are *already running*, and its
+first statement is `if (!SettingsManager::getAll()['enable_cache']) return;`,
+so with the cache off it does nothing whatsoever. Starting a stream is a
+different call entirely, the one behind the panel's own Start button:
+
+    ApiClient::request(['action' => 'stream', 'sub' => 'start',
+                       'stream_ids' => [...], 'servers' => [$rServerID]]);
+
+`Public/admin/api.php` fans that out to each listed server's internal API as
+`function=start`, where `InternalApiController` calls
+`StreamProcess::startMonitor()`. The import path never made it. Upstream's
+own create-a-stream flow does make it -- `StreamService.php:421` and
+`ChannelService.php:205`, both gated on the form's *restart on edit* box --
+so the module was simply missing the second half of the sequence.
+
+Three details worth keeping:
+
+- **Group by server.** Omitting `servers` is not harmless: the handler
+  falls back to `array_keys($rAllServers)` and broadcasts the start to
+  every server in the install, including ones with no `streams_servers`
+  row for that channel. The servers are read back from `streams_servers`
+  rather than from the import's target list, which also covers a
+  `target_server_id` still naming a deleted server -- `Public/admin/api.php`
+  indexes `$rAllServers` by that id without checking it exists.
+- **Skip `direct_source`.** Those channels hand the origin URL straight to
+  the client; there is no ffmpeg to start, and `StreamProcess::startStream()`
+  filters on `direct_source = 0` so the call would match nothing.
+- **Raise the timeout.** `ApiClient::request()` defaults to 5 s and the
+  receiving end sleeps 50 ms per stream, so a bulk import would be cut off
+  part way through the batch. It now scales with the batch, capped at 120 s.
+
+**Refresh source URLs** had the same shape and is fixed with it: it rewrote
+`stream_source` and pushed a cache update, but a running process holds the
+URL it was started with, so changing the protocol or token appeared to do
+nothing until each channel was restarted by hand.
+
 ## Faults found in the fork's own CI
 
 Same rule: do not revert these. Every one was verified, not reasoned about.
