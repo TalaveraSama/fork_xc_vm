@@ -10,9 +10,11 @@ use XcVm\Core\Module\NavbarItem;
 use XcVm\Core\Module\NavbarRegistry;
 use XcVm\Infrastructure\Database\DatabaseFactory;
 use XcVm\Module\Dvb\Service\DvbAdapterService;
+use XcVm\Module\Dvb\Service\DvbImportService;
 use XcVm\Module\Dvb\Service\DvbJobService;
 use XcVm\Module\Dvb\Service\DvbScanService;
 use XcVm\Module\Dvb\Service\DvbServiceCatalog;
+use XcVm\Module\Dvb\Service\DvbStreamRunner;
 use XcVm\Module\Dvb\Service\DvbTransponderService;
 
 /**
@@ -63,7 +65,7 @@ class DvbModule extends BaseModule {
 	}
 
 	public function getVersion(): string {
-		return '1.0.0';
+		return '1.1.0';
 	}
 
 	/**
@@ -82,8 +84,10 @@ class DvbModule extends BaseModule {
 			if ($rDb !== null && DatabaseFactory::get() === null) {
 				DvbAdapterService::setDb($rDb);
 				DvbJobService::setDb($rDb);
+				DvbImportService::setDb($rDb);
 				DvbScanService::setDb($rDb);
 				DvbServiceCatalog::setDb($rDb);
+				DvbStreamRunner::setDb($rDb);
 				DvbTransponderService::setDb($rDb);
 			}
 		}
@@ -135,6 +139,12 @@ class DvbModule extends BaseModule {
 		]);
 		$router->api('dvb_import', [DvbController::class, 'apiImport'], [
 			'permission' => ['adv', 'add_stream'],
+		]);
+		$router->api('dvb_unlink', [DvbController::class, 'apiUnlink'], [
+			'permission' => ['adv', 'add_stream'],
+		]);
+		$router->api('dvb_stream', [DvbController::class, 'apiStream'], [
+			'permission' => ['adv', 'streams'],
 		]);
 	}
 

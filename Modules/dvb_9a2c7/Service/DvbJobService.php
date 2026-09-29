@@ -27,6 +27,8 @@ class DvbJobService {
 	/** Job types understood by DvbCronJob. */
 	public const TYPE_DISCOVER = 'discover';
 	public const TYPE_SCAN     = 'scan';
+	public const TYPE_RESTREAM = 'restream';
+	public const TYPE_STOP     = 'stopstream';
 
 	/** Finished jobs are kept this long so the UI can still show the outcome. */
 	private const KEEP_SECONDS = 86400;
@@ -166,6 +168,17 @@ class DvbJobService {
 		$db->query(
 			'DELETE FROM `dvb_jobs` WHERE `status` IN(\'done\', \'error\') AND `finished_at` < ?;',
 			time() - self::KEEP_SECONDS
+		);
+
+		// Release tuners claimed by a run that died. A stale claim is
+		// indistinguishable from a live one at the point of use, so without
+		// this a crashed scan costs a tuner until someone reboots the node.
+		$db->query(
+			'UPDATE `dvb_adapters` a
+			 LEFT JOIN `dvb_transponders` t ON t.`id` = a.`in_use_by`
+			 SET a.`in_use_by` = NULL
+			 WHERE a.`in_use_by` IS NOT NULL
+			   AND (t.`id` IS NULL OR (t.`scan_status` <> \'scanning\' AND t.`stream_status` <> \'running\'));'
 		);
 	}
 }

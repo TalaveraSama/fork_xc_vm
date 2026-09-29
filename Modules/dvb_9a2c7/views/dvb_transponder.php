@@ -172,6 +172,16 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 							</div>
 
 							<div class="form-group">
+								<label>Output host</label>
+								<input type="text" name="output_host" class="form-control" value="<?php echo htmlspecialchars((string) ($rTransponder['output_host'] ?? '127.0.0.1'), ENT_QUOTES); ?>" placeholder="127.0.0.1">
+								<small class="form-text text-muted">
+									Where DVBlast sends the services. Leave it on loopback: the channels run on
+									this same node, so nothing needs to touch the network. Use a 239.x.y.z group
+									only if another machine must receive them too.
+								</small>
+							</div>
+
+							<div class="form-group">
 								<label>Input Stream Id (multistream / DVB-S2X)</label>
 								<input type="text" name="isi" class="form-control" value="<?php echo ((int) $rTransponder['isi'] >= 0) ? (int) $rTransponder['isi'] : ''; ?>" placeholder="leave empty for a normal carrier">
 							</div>

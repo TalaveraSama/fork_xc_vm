@@ -3,7 +3,10 @@
 namespace XcVm\Module\Dvb;
 
 use XcVm\Core\Http\RequestManager;
+use XcVm\Domain\Bouquet\BouquetService;
+use XcVm\Domain\Stream\CategoryService;
 use XcVm\Module\Dvb\Service\DvbAdapterService;
+use XcVm\Module\Dvb\Service\DvbImportService;
 use XcVm\Module\Dvb\Service\DvbJobService;
 use XcVm\Module\Dvb\Service\DvbScanService;
 use XcVm\Module\Dvb\Service\DvbServiceCatalog;
@@ -131,9 +134,11 @@ class DvbController {
 			$rTransponderID = (int) $rTransponders[0]['id'];
 		}
 
-		$rServices = $rTransponderID > 0 ? DvbServiceCatalog::forTransponder($rTransponderID) : [];
-		$_TITLE    = 'DVB Services';
-		$_STATUS   = $this->status();
+		$rServices   = $rTransponderID > 0 ? DvbServiceCatalog::forTransponder($rTransponderID) : [];
+		$rCategories = CategoryService::getAllByType('live');
+		$rBouquets   = BouquetService::getAllSimple();
+		$_TITLE      = 'DVB Services';
+		$_STATUS     = $this->status();
 
 		renderUnifiedLayoutHeader('admin', ['_TITLE' => $_TITLE]);
 		include $this->viewsPath . '/dvb_services.php';
@@ -272,9 +277,84 @@ class DvbController {
 	 * @return void
 	 */
 	public function apiImport() {
+		$rIDs = $this->input('service_ids', []);
+
+		if (!is_array($rIDs)) {
+			$rIDs = array_filter(explode(',', (string) $rIDs), 'strlen');
+		}
+
+		$rIDs = array_map('intval', $rIDs);
+
+		if (empty($rIDs)) {
+			$this->json(['result' => false, 'error' => 'No service selected.']);
+		}
+
+		$rResult = DvbImportService::import($rIDs, [
+			'category_id'    => (int) $this->input('category_id', 0),
+			'bouquets'       => (array) $this->input('bouquets', []),
+			'prefix'         => (string) $this->input('prefix', ''),
+			'skip_encrypted' => !empty($this->input('skip_encrypted')),
+			'start'          => !empty($this->input('start')),
+		]);
+
 		$this->json([
-			'result' => false,
-			'error'  => 'Importing services as channels is not wired up yet in 1.0.0. Scan results are stored and visible; the import step lands next.',
+			'result'   => $rResult['status'],
+			'imported' => $rResult['imported'],
+			'skipped'  => $rResult['skipped'],
+			'error'    => implode(' | ', $rResult['errors']),
+			'note'     => $rResult['imported'] > 0
+				? 'Created ' . $rResult['imported'] . ' channel(s). The tuner node starts feeding them on its next cron tick, within a minute.'
+				: 'Nothing imported.',
+		]);
+	}
+
+	/**
+	 * Unlink a service from the channel it created.
+	 *
+	 * @return void
+	 */
+	public function apiUnlink() {
+		$rResult = DvbImportService::unlink((int) $this->input('id', 0));
+
+		$this->json([
+			'result' => $rResult['status'],
+			'error'  => $rResult['status'] ? '' : $rResult['message'],
+			'note'   => $rResult['message'],
+		]);
+	}
+
+	/**
+	 * Start or stop the DVBlast feeding a transponder.
+	 *
+	 * Both directions go through the job queue rather than acting here: the
+	 * panel has no tuner and cannot start a process on another machine.
+	 *
+	 * @return void
+	 */
+	public function apiStream() {
+		$rID          = (int) $this->input('id', 0);
+		$rTransponder = DvbTransponderService::find($rID);
+
+		if ($rTransponder === null) {
+			$this->json(['result' => false, 'error' => 'Transponder not found.']);
+		}
+
+		$rStart = ((string) $this->input('sub', 'start')) !== 'stop';
+
+		DvbTransponderService::setStreaming($rID, $rStart);
+
+		$rJobID = DvbJobService::enqueue(
+			(int) $rTransponder['server_id'],
+			$rStart ? DvbJobService::TYPE_RESTREAM : DvbJobService::TYPE_STOP,
+			$rID
+		);
+
+		$this->json([
+			'result' => true,
+			'job_id' => $rJobID,
+			'note'   => $rStart
+				? 'Queued. The tuner node starts DVBlast within a minute.'
+				: 'Queued. The tuner node stops DVBlast within a minute.',
 		]);
 	}
 

@@ -35,6 +35,13 @@ CREATE TABLE IF NOT EXISTS `dvb_adapters` (
 -- One row per transponder/mux the operator defines. Frequencies are stored in
 -- kHz for satellite (11778000 = 11778 MHz) and in Hz for terrestrial/cable,
 -- which is what dvbv5 expects in each case.
+--
+-- `output_host` is where DVBlast fans the services out to. It defaults to
+-- 127.0.0.1 on purpose: the panel streams created from this transponder are
+-- pinned to the same node, so ffmpeg reads the multicast-free loopback and
+-- nothing touches the network. Set it to a 239.x.y.z group only when another
+-- machine has to receive the same services -- multicast across a cheap switch
+-- is a well-known way to break both the switch and the stream.
 CREATE TABLE IF NOT EXISTS `dvb_transponders` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `server_id` int(11) NOT NULL DEFAULT 1,
@@ -63,6 +70,11 @@ CREATE TABLE IF NOT EXISTS `dvb_transponders` (
   `last_scan` int(11) DEFAULT NULL,
   `signal_strength` int(11) DEFAULT NULL,
   `signal_quality` int(11) DEFAULT NULL,
+  `output_host` varchar(64) COLLATE utf8_unicode_ci DEFAULT '127.0.0.1',
+  `streaming` tinyint(1) NOT NULL DEFAULT 0,
+  `stream_status` varchar(16) COLLATE utf8_unicode_ci DEFAULT 'stopped',
+  `stream_message` text COLLATE utf8_unicode_ci,
+  `stream_checked` int(11) DEFAULT NULL,
   `enabled` tinyint(1) NOT NULL DEFAULT 1,
   PRIMARY KEY (`id`),
   KEY `server_id` (`server_id`),

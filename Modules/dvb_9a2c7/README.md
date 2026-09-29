@@ -1,7 +1,7 @@
 # DVB module for XC_VM
 
-Native DVB tuner support. Define a transponder in the panel, scan it, get the
-list of services on it — without Cesbo Astra and without TVHeadend.
+Native DVB tuner support. Define a transponder in the panel, scan it, import the
+services you want as live channels — without Cesbo Astra and without TVHeadend.
 
 Built and tested against a **TBS6909X** (DVB-S/S2/S2X, eight tuners), but
 nothing in it is TBS-specific: it drives the standard Linux DVB API, so any
@@ -65,11 +65,12 @@ dmesg | grep -i frontend
 ### 2. Userspace tools
 
 ```sh
-apt-get install dvb-tools    # dvbv5-scan, dvb-fe-tool
+apt-get install dvb-tools dvblast
 ```
 
-`dvbv5-scan` does the scanning. `dvb-fe-tool` is optional: without it adapters
-are still discovered, they just show up unnamed.
+`dvbv5-scan` (from `dvb-tools`) does the scanning and `dvblast` does the
+streaming. `dvb-fe-tool` is optional: without it adapters are still discovered,
+they just show up unnamed.
 
 ### 3. Permissions
 
@@ -94,7 +95,9 @@ DVB-specific is required at this step.
    rate, choose the LNB and DiSEqC port. Press **Save and scan**.
 3. Watch the row: `scanning` → `ok` with a service count, or an error that says
    what to fix.
-4. **Streams → DVB Services** lists what was found.
+4. **Streams → DVB Services** lists what was found. Tick the ones you want,
+   choose a category and bouquets, and press **Import selected**. Within a
+   minute DVBlast starts and the channels carry picture.
 
 Units are the usual trap, so the form is forgiving: a satellite frequency typed
 as `11778` is read as MHz and converted to kHz, and a symbol rate of `27500` is
@@ -120,19 +123,43 @@ crontab -u xc_vm -l | grep cron:dvb
 
 If that line is missing, `console.php status` rewrites the crontab.
 
-## What is not done yet (1.0.0)
+## Streaming: how a service becomes a channel
 
-**Importing services as panel channels.** Scan results are stored and shown,
-but the button that turns a selection into `streams` rows is not wired up; the
-API action returns an explicit "not yet" rather than failing silently.
+Importing a service does five things:
 
-The plan for it, so the shape is clear: one `dvblast` process per transponder
-on the tuner node, tuned once, fanning every selected service out to its own
-UDP address — that is exactly what DVBlast is for, and TBS documents it for
-this card. Each panel stream then gets `udp://@239.x.y.z:port` as its source.
-No core change is needed for the playback half: `Domain/Stream/StreamProcess.php`
-passes `-i {STREAM_SOURCE}` straight to ffmpeg, so a UDP source already works
-today.
+1. allocates a UDP port on the tuner node;
+2. creates a `streams` row whose source is `udp://127.0.0.1:<port>`;
+3. pins it to the tuner node in `streams_servers`;
+4. marks the transponder as "should be streaming";
+5. queues a job so DVBlast is rebuilt with the new output.
+
+DVBlast then tunes the carrier **once** and fans every imported service out to
+its own port. A transponder with twenty imported channels costs one tuner, not
+twenty — which is the whole reason for using it.
+
+The output address is loopback on purpose. The channel runs on the same machine
+that holds the card, so ffmpeg reads the loopback: no multicast routing, no IGMP,
+nothing on the wire. Set the transponder's **Output host** to a `239.x.y.z` group
+only when a second machine has to receive the same services.
+
+A supervisor runs on every cron tick and restarts any DVBlast that should be up
+and is not, so streams come back by themselves after the node reboots.
+
+### Two things DVBlast cannot do
+
+- **Multistream (ISI/PLS) carriers.** It has no option for them. Such a
+  transponder can be scanned but not streamed, and the module says so instead
+  of tuning the wrong thing.
+- **Non-universal LNBs.** It assumes 9750/10600 with the switch at 11700 and
+  cannot be told another local oscillator. Scanning honours whatever LNB you
+  picked; streaming refuses anything but `UNIVERSAL`.
+
+### DiSEqC numbering, a trap worth knowing
+
+dvbv5 counts satellites from 0 and DVBlast from 1. The module stores the port
+the way an operator says it (1-4) and converts per tool. If you ever drive these
+binaries by hand, getting this wrong gives you a healthy lock on the wrong
+satellite — which looks like a working system showing the wrong channels.
 
 ## Tables
 

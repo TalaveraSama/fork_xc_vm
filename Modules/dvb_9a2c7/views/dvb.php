@@ -122,6 +122,7 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 										<th>Server</th>
 										<th class="text-center">Signal</th>
 										<th class="text-center">Services</th>
+										<th class="text-center">Streaming</th>
 										<th>Last scan</th>
 										<th class="text-center">Actions</th>
 									</tr>
@@ -186,6 +187,15 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 													<span class="text-muted">0</span>
 												<?php endif; ?>
 											</td>
+											<td class="text-center">
+												<?php if ($rRow['stream_status'] === 'running'): ?>
+													<span class="badge badge-success" title="<?php echo htmlspecialchars((string) $rRow['stream_message'], ENT_QUOTES); ?>">on air</span>
+												<?php elseif ($rRow['stream_status'] === 'error'): ?>
+													<span class="badge badge-danger" title="<?php echo htmlspecialchars((string) $rRow['stream_message'], ENT_QUOTES); ?>">error</span>
+												<?php else: ?>
+													<span class="badge badge-secondary">off</span>
+												<?php endif; ?>
+											</td>
 											<td>
 												<small><?php echo $rRow['last_scan'] ? date('Y-m-d H:i', (int) $rRow['last_scan']) : 'never'; ?></small>
 											</td>
@@ -193,6 +203,17 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 												<button type="button" class="btn btn-sm btn-primary" title="Scan now" onclick="dvbScan(<?php echo $rID; ?>);">
 													<i class="mdi mdi-radar"></i>
 												</button>
+												<?php if ((int) $rRow['service_count'] > 0): ?>
+													<?php if (!empty($rRow['streaming'])): ?>
+														<button type="button" class="btn btn-sm btn-warning" title="Stop streaming" onclick="dvbStream(<?php echo $rID; ?>, 'stop');">
+															<i class="mdi mdi-stop"></i>
+														</button>
+													<?php else: ?>
+														<button type="button" class="btn btn-sm btn-success" title="Start streaming" onclick="dvbStream(<?php echo $rID; ?>, 'start');">
+															<i class="mdi mdi-play"></i>
+														</button>
+													<?php endif; ?>
+												<?php endif; ?>
 												<button type="button" class="btn btn-sm btn-secondary" title="Show tuning file" onclick="dvbPreview(<?php echo $rID; ?>);">
 													<i class="mdi mdi-file-document-outline"></i>
 												</button>
@@ -273,6 +294,20 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 				dvbPoll(rJobID, rTries);
 			}, 'json');
 		}, 5000);
+	}
+
+	function dvbStream(rID, rSub) {
+		$.post('./api?action=dvb_stream', {
+			id: rID,
+			sub: rSub
+		}, function(rData) {
+			if (!rData.result) {
+				dvbNotify(rData.error);
+				return;
+			}
+			dvbNotify(rData.note);
+			dvbPoll(rData.job_id);
+		}, 'json');
 	}
 
 	function dvbPreview(rID) {

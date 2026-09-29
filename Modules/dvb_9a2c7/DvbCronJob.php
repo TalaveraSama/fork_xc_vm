@@ -8,6 +8,7 @@ use XcVm\Module\Dvb\Service\DvbAdapterService;
 use XcVm\Module\Dvb\Service\DvbJobService;
 use XcVm\Module\Dvb\Service\DvbScanService;
 use XcVm\Module\Dvb\Service\DvbServiceCatalog;
+use XcVm\Module\Dvb\Service\DvbStreamRunner;
 use XcVm\Module\Dvb\Service\DvbTransponderService;
 
 /**
@@ -57,6 +58,10 @@ class DvbCronJob implements CommandInterface {
 			DvbJobService::housekeep();
 		}
 
+		// Supervision runs on every tick, job or no job: a DVBlast that died
+		// overnight has to come back without anyone pressing anything.
+		$this->supervise($rServerID);
+
 		$rJob = DvbJobService::claim($rServerID);
 
 		if ($rJob === null) {
@@ -73,6 +78,14 @@ class DvbCronJob implements CommandInterface {
 
 				case DvbJobService::TYPE_SCAN:
 					$rResult = $this->scan($rJob);
+					break;
+
+				case DvbJobService::TYPE_RESTREAM:
+					$rResult = $this->restream($rJob);
+					break;
+
+				case DvbJobService::TYPE_STOP:
+					$rResult = $this->stopStream($rJob);
 					break;
 
 				default:
@@ -154,6 +167,28 @@ class DvbCronJob implements CommandInterface {
 			return ['status' => false, 'message' => 'No tuner available on server ' . (int) $rTransponder['server_id'] . '.'];
 		}
 
+		// Never interrupt a live stream to run a scan. A pinned tuner that is
+		// busy feeding another carrier would otherwise be taken away, dropping
+		// every channel on it — and the operator would see only "device busy"
+		// on the scan, with no hint that they had just knocked a transponder
+		// off the air.
+		// Any claim at all means the frontend is taken: only a live DVBlast or
+		// a scan holds one, and the per-node lock rules out a concurrent scan.
+		// Scanning the very transponder that is streaming is refused too —
+		// dvblast owns the device, so dvbv5-scan would just report "busy".
+		$rBusyWith = (int) ($rAdapter['in_use_by'] ?? 0);
+
+		if ($rBusyWith > 0) {
+			$rMessage = $rBusyWith === (int) $rTransponder['id']
+				? 'This transponder is streaming, so its tuner is busy. Stop streaming before rescanning it.'
+				: 'Tuner adapter' . (int) $rAdapter['adapter_num']
+					. ' is streaming transponder #' . $rBusyWith . '. Stop that transponder, or pin this one to a free tuner.';
+
+			DvbTransponderService::recordScan((int) $rTransponder['id'], 'error', $rMessage);
+
+			return ['status' => false, 'message' => $rMessage];
+		}
+
 		DvbTransponderService::recordScan((int) $rTransponder['id'], 'scanning', 'Tuning...');
 		DvbAdapterService::claim((int) $rAdapter['id'], (int) $rTransponder['id']);
 
@@ -188,6 +223,73 @@ class DvbCronJob implements CommandInterface {
 		DvbTransponderService::recordScan((int) $rTransponder['id'], 'ok', $rMessage, $rScan['signal']);
 
 		return ['status' => true, 'message' => $rMessage];
+	}
+
+	/**
+	 * Rebuild and restart the DVBlast feeding one transponder.
+	 *
+	 * @param array $rJob Claimed job row.
+	 * @return array{status:bool,message:string}
+	 */
+	private function restream(array $rJob) {
+		$rTransponder = DvbTransponderService::find((int) $rJob['ref_id']);
+
+		if ($rTransponder === null) {
+			return ['status' => false, 'message' => 'Transponder ' . (int) $rJob['ref_id'] . ' no longer exists.'];
+		}
+
+		$rResult = DvbStreamRunner::start($rTransponder);
+		DvbStreamRunner::record((int) $rTransponder['id'], $rResult['status'] ? 'running' : 'error', $rResult['message']);
+
+		return $rResult;
+	}
+
+	/**
+	 * Stop the DVBlast feeding one transponder.
+	 *
+	 * @param array $rJob Claimed job row.
+	 * @return array{status:bool,message:string}
+	 */
+	private function stopStream(array $rJob) {
+		$rID          = (int) $rJob['ref_id'];
+		$rTransponder = DvbTransponderService::find($rID);
+
+		// A stop queued by delete() outlives the row it refers to, on purpose:
+		// the process has to be reaped even though the transponder is gone.
+		// Stopping needs only the id (to find the PID file) and the adapter
+		// binding (to release it), so a synthetic row is enough — treating a
+		// missing transponder as an error here would strand DVBlast holding a
+		// tuner and a frequency with nothing left to reconcile it against.
+		if ($rTransponder === null) {
+			$rTransponder = ['id' => $rID, 'adapter_id' => null];
+		}
+
+		$rResult = DvbStreamRunner::stop($rTransponder);
+		DvbStreamRunner::record($rID, 'stopped', 'Stopped by request.');
+
+		return $rResult;
+	}
+
+	/**
+	 * Restart anything that should be streaming on this node and is not.
+	 *
+	 * Deliberately silent unless it had to act: this runs sixty times an hour
+	 * and a log line per tick would bury everything else.
+	 *
+	 * @param int $rServerID This node.
+	 * @return void
+	 */
+	private function supervise($rServerID) {
+		$rCounts = DvbStreamRunner::supervise($rServerID);
+
+		if ($rCounts['started'] || $rCounts['stopped'] || $rCounts['failed']) {
+			echo sprintf(
+				"[dvb] supervisor: %d started, %d stopped, %d failed\n",
+				$rCounts['started'],
+				$rCounts['stopped'],
+				$rCounts['failed']
+			);
+		}
 	}
 
 	/**

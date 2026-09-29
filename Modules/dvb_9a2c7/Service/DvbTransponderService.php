@@ -41,7 +41,8 @@ class DvbTransponderService {
 		'server_id', 'adapter_id', 'name', 'satellite', 'delivery_system',
 		'frequency', 'polarization', 'symbol_rate', 'modulation', 'inner_fec',
 		'rolloff', 'pilot', 'bandwidth', 'isi', 'pls_mode', 'pls_code',
-		'lnb_type', 'lnb_low', 'lnb_high', 'lnb_switch', 'diseqc', 'enabled',
+		'lnb_type', 'lnb_low', 'lnb_high', 'lnb_switch', 'diseqc', 'output_host',
+		'enabled',
 	];
 
 	/**
@@ -157,6 +158,20 @@ class DvbTransponderService {
 
 		$rRow['enabled'] = !empty($rRow['enabled']) ? 1 : 0;
 
+		// Where DVBlast fans the services out to. Loopback is the default and
+		// the right answer whenever the channels run on the tuner node itself.
+		$rHost = trim((string) ($rRow['output_host'] ?? ''));
+
+		if ($rHost === '') {
+			$rHost = '127.0.0.1';
+		}
+
+		if (filter_var($rHost, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+			return self::fail('Output host must be an IPv4 address, for example 127.0.0.1 or 239.10.0.1.');
+		}
+
+		$rRow['output_host'] = $rHost;
+
 		if (empty($rRow['name'])) {
 			$rRow['name'] = self::autoName($rRow, $rSatellite);
 		}
@@ -214,6 +229,24 @@ class DvbTransponderService {
 	}
 
 	/**
+	 * Mark whether this transponder should be feeding DVBlast.
+	 *
+	 * Intent only. The tuner node reconciles reality with it on its next tick,
+	 * which is also what brings a stream back after the node reboots.
+	 *
+	 * @param int  $rID        Transponder id.
+	 * @param bool $rStreaming Desired state.
+	 * @return bool
+	 */
+	public static function setStreaming($rID, $rStreaming) {
+		return (bool) self::db()->query(
+			'UPDATE `dvb_transponders` SET `streaming` = ? WHERE `id` = ?;',
+			$rStreaming ? 1 : 0,
+			(int) $rID
+		);
+	}
+
+	/**
 	 * Delete a transponder and everything found on it.
 	 *
 	 * Services already imported as panel streams are unlinked rather than
@@ -225,6 +258,15 @@ class DvbTransponderService {
 	 */
 	public static function delete($rID) {
 		$db = self::db();
+
+		// Ask the node to stop DVBlast before the row vanishes: once the
+		// transponder is gone the supervisor has nothing to reconcile against
+		// and the process would keep a tuner and a frequency for ever.
+		$rRow = self::find($rID);
+
+		if ($rRow !== null && (!empty($rRow['streaming']) || $rRow['stream_status'] === 'running')) {
+			DvbJobService::enqueue((int) $rRow['server_id'], DvbJobService::TYPE_STOP, $rID);
+		}
 
 		$db->query('DELETE FROM `dvb_services` WHERE `transponder_id` = ?;', (int) $rID);
 		$db->query('UPDATE `dvb_adapters` SET `in_use_by` = NULL WHERE `in_use_by` = ?;', (int) $rID);
