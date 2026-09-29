@@ -1864,3 +1864,33 @@ then any `services` filter.
 Nothing in this module needs to change for it. The panel side is complete:
 set `caid` to `1802` on the CAMD profile and, once the account is fixed,
 assigning the CAMD is the only remaining step.
+
+## 2.6.5 — it decrypts; now the stutter
+
+AMC Series came up with `DECRYPT: 70w` showing **running**, channel #22 live at
+2428 Kbps, h264/aac. The whole chain works: card, dvblast, tsdecrypt, newcamd,
+panel. What remained was a periodic stutter, and the reported 58 FPS against a
+nominal 59.94 is about 3% of frames missing.
+
+Two causes, one of them ours.
+
+**Control words arriving late.** The card server's own log gives the latency
+distribution: median 1772 ms, 95th percentile 2128 ms, worst 2181 ms. Control
+words rotate every crypto period, so a CW that arrives after the period starts
+leaves tsdecrypt with no key for those packets, and `mute_on_error` then emits
+nothing rather than mush. That is the stutter. `-T/--input-buffer` exists for
+exactly this and the field is already in the CAMD profile, but its help text
+suggested a flat 1000 ms, which is below this line's 95th percentile. It now
+says to set it above the slowest answer the server gives and names 2500 for a
+two-second line.
+
+**ffmpeg's UDP defaults.** `sourceUrl()` emitted a bare `udp://host:port`. The
+default socket receive buffer is 64 KB, which overflows on the bursts a
+transponder produces, and the loss reads as a bad signal rather than as a
+buffer problem. It now appends
+`?overrun_nonfatal=1&fifo_size=100000&buffer_size=2097152` — roughly 18 MB of
+FIFO, since fifo_size counts 188-byte packets, plus a socket buffer that will
+be clamped by `net.core.rmem_max` if that is left at the distribution default.
+
+Only new imports get the tuned URL. Existing channels keep the source string
+stored at import time and have to be edited or re-imported.

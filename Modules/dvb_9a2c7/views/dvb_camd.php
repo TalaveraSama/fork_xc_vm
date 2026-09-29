@@ -122,8 +122,10 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 								<input type="number" name="input_buffer" class="form-control" min="0" max="10000"
 									value="<?php echo (int) ($rEditing['input_buffer'] ?? 0); ?>">
 								<small class="text-muted">
-									Delays decoding so late control words still arrive in time. Leave at 0 unless
-									the picture breaks up every few seconds, then try 1000.
+									Delays decoding so late control words still arrive in time. Set it above the
+									slowest answer your card server gives: a remote line answering in 2 seconds
+									needs about 2500 here, and leaving it at 0 produces a stutter every crypto
+									period that looks exactly like a weak signal.
 								</small>
 							</div>
 							<div class="form-group">

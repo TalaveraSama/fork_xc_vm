@@ -238,7 +238,15 @@ class DvbImportService {
 		$rFirst = (int) explode('.', $rHost)[0];
 		$rIsMulticast = ($rFirst >= 224 && $rFirst <= 239);
 
-		return 'udp://' . ($rIsMulticast ? '@' : '') . $rHost . ':' . (int) $rPort;
+		// ffmpeg's UDP defaults are sized for a trickle, not for MPEG-TS: a
+		// 64 KB socket buffer overflows on the bursts a transponder produces
+		// and the loss shows up as a stutter that looks like a bad signal.
+		// fifo_size counts 188-byte packets, so 100000 is about 18 MB of
+		// slack, and overrun_nonfatal keeps a momentary overflow from ending
+		// the stream outright.
+		$rTuning = '?overrun_nonfatal=1&fifo_size=100000&buffer_size=2097152';
+
+		return 'udp://' . ($rIsMulticast ? '@' : '') . $rHost . ':' . (int) $rPort . $rTuning;
 	}
 
 	/**
