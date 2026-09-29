@@ -1923,3 +1923,30 @@ operator guessing.
 `DvbCamdService::find()` once per service. It only reaches that line when a
 decryptor is not already running, so the saving is nil in steady state and
 twenty-one identical queries a minute exactly when the node is thrashing.
+
+## 2.6.7 — connected but starved
+
+Seven services showed `70w` + running, ports allocated in pairs as designed
+(10000/10001, 10002/10003, …), and OSCam listed twenty-one connections for the
+account. Only one of them, `00DB:1802@000000` — SID 219, AMC Series — was
+pulling ECMs. The rest were logged in and silent.
+
+That rules out both a session cap and `uniq`: a cap refuses the surplus and
+`uniq` makes sessions take turns, and neither leaves twenty sessions quietly
+connected. A decryptor that logs in and never asks anything is a decryptor
+receiving no input.
+
+tsdecrypt's README names this exact state:
+
+    ECM | Received 0 (0 dup) and processed 0 in 60 seconds.
+    CW  | *ERR* No valid code word was received for 60 seconds!
+
+and attributes it to the streamer not passing ECMs through. `liveTrouble()`
+now matches both lines and reports that the decryptor is connected but starved,
+naming the two causes: dvblast not writing to that service's port, or dvblast
+running without `-Y/--ecm-passthrough` because it was started before the CAMD
+was assigned. The pattern deliberately does not match `Received 1 (0 dup)`,
+which is the different problem of ECMs arriving and being refused.
+
+This is the hardest failure to see from outside, because on the card server it
+looks like a perfectly healthy idle session rather than an error.

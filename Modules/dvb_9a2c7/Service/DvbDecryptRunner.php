@@ -582,6 +582,19 @@ class DvbDecryptRunner {
 				. ' and the right ECM PID will be used.' . $rTail;
 		}
 
+		// A decryptor that is connected but starved is the hardest state to
+		// read from outside: the card server shows a healthy session that
+		// simply never asks anything, so it looks idle rather than broken.
+		// tsdecrypt's own README names this case and its cause.
+		if (preg_match('/Received 0 \(0 dup\) and processed 0/i', $rLog) === 1
+			|| stripos($rLog, 'No valid code word was received') !== false) {
+			return 'Connected to the card server, but not one ECM has arrived, so it has'
+				. ' nothing to ask about. Either dvblast is not writing to this service\'s'
+				. ' port, or it is running without -Y/--ecm-passthrough because it was'
+				. ' started before the CAMD was assigned. Restart the transponder so it'
+				. ' picks the flags up.' . $rTail;
+		}
+
 		$rSignatures = [
 			'no such user'  => 'The CAMD server has no such username.',
 			'doesnt exist'  => 'The CAMD server has no such username.',
