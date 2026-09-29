@@ -148,11 +148,11 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 													<?php if (!empty($rRow['encrypted'])): ?>
 														<i class="mdi mdi-lock text-warning" title="Carries conditional access — you need a CAM to watch it"></i>
 													<?php else: ?>
-														<i class="mdi mdi-lock-open text-success" title="Free to air"></i>
+														<i class="mdi mdi-lock-open text-success" title="No conditional access seen in the scan. This is a guess from the channel file, not a promise: assign a CAMD anyway if the picture is scrambled."></i>
 													<?php endif; ?>
 												</td>
 												<td>
-													<?php if ($rLinked && !empty($rRow['encrypted'])): ?>
+													<?php if ($rLinked): ?>
 														<select class="form-control form-control-sm dvb-camd-pick" data-id="<?php echo (int) $rRow['id']; ?>">
 															<option value="0">&mdash; none &mdash;</option>
 															<?php foreach ($rCamds as $rCamdID => $rCamd): ?>
@@ -171,10 +171,8 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 																<?php echo htmlspecialchars($rState, ENT_QUOTES); ?>
 															</small>
 														<?php endif; ?>
-													<?php elseif (!empty($rRow['encrypted'])): ?>
-														<small class="text-muted">import it first</small>
 													<?php else: ?>
-														<span class="text-muted">&mdash;</span>
+														<small class="text-muted">import it first</small>
 													<?php endif; ?>
 												</td>
 												<td class="text-center">

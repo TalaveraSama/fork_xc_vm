@@ -1796,3 +1796,39 @@ Worth generalising: when a shared server exposes another account's successful
 requests, that account is a control group. Comparing against it converts "my
 side looks right" into "same CAID, same provider, same service, same server,
 one account gets a CW and the other does not".
+
+## 2.6.4 — a heuristic was overruling the operator
+
+The transponder went on air with 71% signal and 21 services, the import form
+had "Skip encrypted" unticked and "Decrypt with: 70w" chosen, the channel was
+created — and the DECRYPT column still read "—". The clue was in the CA
+column: the padlocks had turned **green and open**, meaning `encrypted = 0` on
+every row, where an earlier scan had shown them yellow and closed.
+
+`encrypted` is set from the presence of `PID_09` in the scanned channel file.
+The code already called it "a heuristic, not a promise", and it was wrong
+here: the same services' PMTs carry three Nagra CA descriptors each, as the
+tsdecrypt dump shows. So a scan that does not emit PID_09 marks a scrambled
+mux as free to air.
+
+Two places then silently refused to act on the operator's instruction:
+
+* `import()` required `($rCamd !== null) && !empty($rService['encrypted'])`,
+  so choosing a CAMD did nothing at all.
+* The services view only rendered the per-row DECRYPT dropdown when
+  `$rLinked && !empty($rRow['encrypted'])`, so the manual recovery path was
+  hidden too. Between them there was no way to decrypt anything and no
+  message explaining it.
+
+Picking a CAMD is an explicit instruction and now outranks the guess:
+`$rDecrypt = ($rCamd !== null)`. The dropdown shows for any imported service.
+Being wrong in this direction costs one CAMD session on a free-to-air service,
+since tsdecrypt passes unscrambled data through unharmed; being wrong in the
+other direction cost the whole feature.
+
+The "Free to air" tooltip no longer asserts. It now says no conditional access
+was seen in the scan, that this is a guess from the channel file, and to
+assign a CAMD anyway if the picture is scrambled.
+
+Same shape as 2.5.2, 2.5.6, 2.5.8 and 2.6.0: the module preferred its own
+inference to what it had been told, and said nothing when the two disagreed.

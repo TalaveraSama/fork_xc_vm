@@ -96,7 +96,15 @@ class DvbImportService {
 			// for DVBlast to write into and one for tsdecrypt to write out of.
 			// They are reserved together so a half-allocated service can never
 			// reach the config renderer.
-			$rDecrypt = ($rCamd !== null) && !empty($rService['encrypted']);
+			// Picking a CAMD is an explicit instruction and outranks our guess.
+			// `encrypted` comes from the presence of PID_09 in the scanned
+			// channel file, which is a heuristic that has been observed to
+			// report 0 for services whose PMT is full of CA descriptors. When
+			// it does, gating on it turns "decrypt these with 70w" into silence
+			// and there is nothing in the interface to say why. Being wrong the
+			// other way costs one CAMD session on a free service, because
+			// tsdecrypt passes unscrambled data through unharmed.
+			$rDecrypt = ($rCamd !== null);
 			$rPorts   = self::allocatePorts((int) $rTransponder['server_id'], $rDecrypt ? 2 : 1);
 
 			if (empty($rPorts)) {
