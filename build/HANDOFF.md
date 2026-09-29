@@ -1496,3 +1496,35 @@ separate pass before starting anything -- necessary because a row further down
 the list already holds a session when an earlier row asks for one -- and holds
 the surplus back with a message naming the cap instead of letting the server
 refuse it.
+
+## stream-debug.sh — finding which hop drops the picture
+
+signal-debug.sh proves the carrier locks. `Modules/dvb_9a2c7/stream-debug.sh`
+answers the next question: given a lock, where between tuner and player does
+the picture vanish. It lists the work directory, reports whether dvblast and
+tsdecrypt are running and with which arguments, prints the dvblast configs and
+the tsdecrypt logs verbatim, extracts the UDP ports from those configs and
+uses tcpdump to say which of them actually carry traffic.
+
+Two things it checks that are easy to get wrong and invisible from the panel:
+
+* **`-Y` and `-W` on the dvblast command line.** dvblast strips conditional
+  access tables by default. `DvbStreamRunner::buildCommand()` adds both as
+  soon as any service on the carrier is decrypting, but dvblast only reads its
+  config and arguments at startup, so a carrier that was already streaming
+  when the CAMD was assigned keeps running without them. tsdecrypt then logs
+  in and waits for ECMs that never arrive.
+* **Which CA selection tsdecrypt got.** `-C <caid>` is exact; `-c <name>`
+  falls back to CONAX for anything unrecognised. tsdecrypt locates the ECM PID
+  in the PMT by CA system, so a CONAX setting on a Nagravision (1802) carrier
+  finds no ECM PID and never sends a request. On the server that looks like a
+  client which logs in and then goes silent — not like a failure at all.
+
+Worth recording for context, since the question keeps coming up: TVHeadend,
+Cesbo Astra and set-top receivers descramble inside a single process. They
+demux, read the ECM PID from the PMT, talk to the card server and apply the
+control word with no UDP hop. This module splits those stages across dvblast
+and tsdecrypt, which buys reuse and costs two extra failure modes — ECMs must
+survive the remux, and the descrambler must be told the right CA system.
+Neither is a defect in the design, but both are invisible unless something
+looks at the actual command lines, which is what this script is for.
