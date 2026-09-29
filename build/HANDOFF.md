@@ -1403,3 +1403,38 @@ conflict properly.
 
 Operationally: Cesbo Astra must be stopped and disabled on that node, or it
 will keep claiming tuners the module wants.
+
+## 2.5.7 — the import threw away the CAMD you picked
+
+Scanning and importing both worked, 21 services were found and channels were
+created, and not one of them would open. The DECRYPT column read "—" on every
+imported row even though "Decrypt with: 70w" had been chosen.
+
+`apiImport()` built its options array with `category_id`, `bouquets`, `prefix`,
+`skip_encrypted` and `start`. It never read `camd_id`. The view has always sent
+it (`camd_id: $('#import_camd').val()`) and `DvbImportService::import()` has
+always expected it (`$rCamdID = (int) ($rOptions['camd_id'] ?? 0)`), so the
+value was dropped in the one layer between them.
+
+The consequence is total rather than partial, because of:
+
+    $rDecrypt = ($rCamd !== null) && !empty($rService['encrypted']);
+
+With no CAMD, `$rDecrypt` is false for every service, so each row was stored
+with `camd_id` NULL, `enc_port` NULL and `decrypt_status` 'off'. DVBlast then
+wrote the scrambled transport stream straight to `output_port`, tsdecrypt was
+never started, and the channel served encrypted bytes to the player.
+
+`apiDecrypt()` / `assignCamd()` were never affected: that path reads `camd_id`,
+allocates an `enc_port` when one is missing and restreams. It is the recovery
+route for channels imported before this fix, and it works on 2.5.6 too.
+
+Also added a guard for a genuinely confusing combination: choosing a CAMD while
+leaving "Skip encrypted" ticked now fails with an explanation instead of
+importing nothing useful. The encrypted services are precisely the ones a CAMD
+exists for, so the two settings cancel out.
+
+Wiring the CAMD up is not the same as the CAMD working. Once `camd_id` and
+`enc_port` are set, `decrypt_status` moves pending -> running or error, and
+`decrypt_message` carries tsdecrypt's reason. That is where to look next if a
+channel still does not open.

@@ -409,11 +409,29 @@ class DvbController {
 			$this->json(['result' => false, 'error' => 'No service selected.']);
 		}
 
+		$rCamdID = (int) $this->input('camd_id', 0);
+		$rSkip   = !empty($this->input('skip_encrypted'));
+
+		// Picking a CAMD and also skipping encrypted services cancels itself
+		// out: the only services a CAMD is for are exactly the ones being
+		// skipped, so the import would quietly create nothing worth having.
+		if ($rCamdID > 0 && $rSkip) {
+			$this->json([
+				'result' => false,
+				'error'  => 'You chose a CAMD to decrypt with, but "Skip encrypted" is still ticked. Those cancel out — the encrypted services are the only ones the CAMD would be used for. Untick it and import again.',
+			]);
+		}
+
 		$rResult = DvbImportService::import($rIDs, [
 			'category_id'    => (int) $this->input('category_id', 0),
 			'bouquets'       => (array) $this->input('bouquets', []),
 			'prefix'         => (string) $this->input('prefix', ''),
-			'skip_encrypted' => !empty($this->input('skip_encrypted')),
+			'skip_encrypted' => $rSkip,
+			// Without this the chosen CAMD never reached the importer, so
+			// every encrypted channel was created with camd_id NULL and no
+			// enc_port: DVBlast fed the panel the scrambled stream and the
+			// channel simply would not open.
+			'camd_id'        => $rCamdID,
 			'start'          => !empty($this->input('start')),
 		]);
 

@@ -366,7 +366,7 @@ a new **stable** release weekly and opens an issue listing which of the seven
 that release also modified — the only ones needing manual work.
 
 Upstream's 2.5.x line is tagged but published as prereleases, so the watcher
-ignores it: their latest stable is still 2.3.9. This fork ships **2.5.6** --
+ignores it: their latest stable is still 2.3.9. This fork ships **2.5.7** --
 deliberately ahead, so a panel installed from here is offered this fork's
 updates instead of sitting on a number upstream also uses.
 
