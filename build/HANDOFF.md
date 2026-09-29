@@ -1190,3 +1190,34 @@ Checklist for any future module view:
   * every `$.post`/`$.getJSON` chains a `.fail()`
 
 No schema change, so no `migrations/1.2.2.sql`.
+
+### 2.5.1 — `update update` answered from a stale release cache
+
+Straight after 2.5.0 was published, a panel on 2.4.9 kept reporting:
+
+    Checking for updates (server=MAIN, version=2.4.9)...
+    Using cached releases (channel: stable) from /home/xc_vm/tmp/gitapi_TalaveraSama_fork_xc_vm_stable
+    Already up to date.
+
+`GitHubReleases` caches the release list for 30 minutes
+(`$cache_ttl = 1800`). The list had been fetched while 2.4.9 was still the
+newest tag, so the check could not see 2.5.0 — and repeating the command
+never helped, because every attempt read the same file. The only escape was
+deleting it by hand.
+
+Only humans reach this code path. `RootSignalsCronJob:551` runs
+`console.php update update` for the panel's Update button, and the rest is
+someone typing it. Answering "update me now" from a half-hour-old list is
+simply wrong, so the `update` action now calls `clearCache()` before asking.
+
+The periodic checker behind the "update available" banner is a different
+class, `UpdateCronJob`, which builds its own client and still uses the cache,
+so the unauthenticated 60-requests-per-hour API limit stays protected where
+it is actually at risk. `cron:maxmind --force` and `cron:proxy --force`
+already had their own escape hatch; the update check was the one that did not.
+
+Symptom to recognise: "Already up to date" together with a "Using cached
+releases" line naming a file in `/home/xc_vm/tmp/`. Manual workaround on an
+older build:
+
+    rm -f /home/xc_vm/tmp/gitapi_<owner>_<repo>_<channel>

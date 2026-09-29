@@ -65,6 +65,22 @@ class UpdateCommand implements CommandInterface {
 				echo "Checking for updates (server={$rServerType}, version=" . XC_VM_VERSION . ")...\n";
 				UpdateLogger::info('Update started; server=' . $rServerType . ', current version=' . XC_VM_VERSION);
 
+				// Always ask GitHub, never the 30-minute release cache.
+				//
+				// Every caller of this action is a human saying "update me
+				// now": RootSignalsCronJob runs it for the panel's Update
+				// button, and the rest is someone typing it. Answering that
+				// from a list fetched up to half an hour ago reports "Already
+				// up to date" for a release that already exists, and no amount
+				// of retrying clears it -- the only escape is deleting the
+				// cache file by hand.
+				//
+				// The periodic checker that feeds the "update available"
+				// banner is UpdateCronJob, which builds its own client and
+				// still uses the cache, so the API rate limit stays protected
+				// where it actually matters.
+				$gitRelease->clearCache();
+
 				$rLatest = $gitRelease->getLatestVersion(
 					$rIsMain ? XC_VM_VERSION : ServerRepository::getAll()[SERVER_ID]['xc_vm_version']
 				);
