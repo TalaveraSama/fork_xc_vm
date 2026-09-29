@@ -1767,3 +1767,32 @@ strtoul, by luck. It now strips a leading `0x` first.
 
 Also confirmed from the same log: `dvbv5-zap` in record mode needs `-l` (else
 "Need a LNBf to work") and takes the **channel name**, not the frequency.
+
+## Differential CAID/SID testing against a known-good account
+
+With `-C 0x1802 -M 0x02ce` every client-side field finally lined up: the card
+reports CAID 0x1802, tsdecrypt selects ECM CAID 0x1802 on CA PID 0x0c20, the
+service is 0x02ce, and real ECM payloads go out. The server still answers
+"Card was not able to decode the channel", which in newcamd terms is the
+3-byte DCW meaning not-found.
+
+That exhausts what the client can be blamed for, but "it must be the provider"
+is a weak conclusion on its own. There is a stronger one available whenever
+another account is visible in the same server's log.
+
+An earlier capture of that log showed a working user, `celestedeco`, receiving
+control words for a list of SIDs on the same CAID and provider. Two of those,
+**0x010f (271)** and **0x02a0 (672)**, are also present in our transponder's
+PAT. **0x02ce (718) was not in that list.**
+
+So the test is: run the same tsdecrypt command with `-M 0x010f`. If it returns
+a control word, the account and the whole chain are fine and 718 is simply not
+in the package — a per-channel entitlement question, not a broken setup. If it
+fails identically on a SID another user decrypts right now, the difference is
+account configuration on the server (reader group, CAID/ident), and that is a
+precise, non-arguable thing to hand the administrator.
+
+Worth generalising: when a shared server exposes another account's successful
+requests, that account is a control group. Comparing against it converts "my
+side looks right" into "same CAID, same provider, same service, same server,
+one account gets a CW and the other does not".
