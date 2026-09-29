@@ -1734,3 +1734,36 @@ and letting the transponder restart is what turns ECM passthrough on. And
 `dvbv5-zap` in record mode (`-P -r`) wants the **channel name**, while monitor
 mode (`-m`) wants the **frequency** — the two forms in the synopsis are not
 interchangeable, which cost a confusing "Can't find channel".
+
+## 2.6.3 — the card server was never the problem: a CAID mismatch
+
+A manual tsdecrypt run against a captured transport stream produced the whole
+answer, and it is not what it looks like. The login succeeded:
+
+    CAM | [newcamd] Card info: CAID 0x1802 Admin=NO
+    --- | ECM CAID: 0x187a (NAGRA)
+    ERR | [newcamd] Card was not able to decode the channel.
+
+The card holds **0x1802**. tsdecrypt was sending it ECMs for **0x187a**. The
+transponder's PMT advertises three Nagra CA descriptors — 0x1802 on CA PID
+0x0c20, 0x1871 on 0x0c21, 0x187a on 0x0c22 — and selecting the CA system by
+family name (`-c NAGRA`) makes tsdecrypt take the last matching descriptor,
+which is not the one the card holds. "Card was not able to decode the channel"
+then reads like a missing entitlement at the provider, and is not one.
+
+So on any carrier with multiple CA systems, the `caid` field on the CAMD
+profile is effectively mandatory: `buildCommand()` only emits `-C` when it is
+set, and otherwise falls back to `-c`.
+
+`liveTrouble()` now parses both lines out of the tsdecrypt log and reports the
+mismatch by name, with the CAID to set. It also recognises "not able to
+decode" on its own.
+
+**`-C` format matters.** tsdecrypt parses it with `strtoul(optarg, NULL, 0)`,
+base 0, so a bare `1802` is read as *decimal* 1802 = CAID 0x070a and matches
+nothing. `caid()` already prefixed `0x`, but its hex filter turned an operator's
+`0x1802` into `0x01802` by eating the `x` and keeping the `0`. Harmless under
+strtoul, by luck. It now strips a leading `0x` first.
+
+Also confirmed from the same log: `dvbv5-zap` in record mode needs `-l` (else
+"Need a LNBf to work") and takes the **channel name**, not the frequency.

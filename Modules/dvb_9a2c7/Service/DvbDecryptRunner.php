@@ -465,8 +465,19 @@ class DvbDecryptRunner {
 	 * @return string|null Prefixed hex CAID, or null when not set.
 	 */
 	public static function caid($rCaid) {
-		$rClean = strtolower(preg_replace('#[^0-9a-fA-F]#', '', (string) $rCaid));
+		$rRaw = strtolower(trim((string) $rCaid));
 
+		// Strip a 0x the operator typed, or its 0 survives the filter below
+		// and "0x1802" becomes "0x01802". tsdecrypt parses that with
+		// strtoul(base 0) and gets the right number anyway, but only by luck.
+		if (strpos($rRaw, '0x') === 0) {
+			$rRaw = substr($rRaw, 2);
+		}
+
+		$rClean = preg_replace('#[^0-9a-f]#', '', $rRaw);
+
+		// The prefix is not decoration: strtoul with base 0 reads a bare 1802
+		// as decimal, which is CAID 0x070a and matches nothing.
 		return ($rClean === '') ? null : '0x' . str_pad($rClean, 4, '0', STR_PAD_LEFT);
 	}
 
@@ -542,6 +553,24 @@ class DvbDecryptRunner {
 
 		$rTail = ' Last log lines: ' . trim(substr($rLog, -400));
 
+		// tsdecrypt prints both halves of the commonest misconfiguration:
+		//   CAM | [newcamd] Card info: CAID 0x1802
+		//   --- | ECM CAID: 0x187a (NAGRA)
+		// A carrier can advertise several CA systems of the same family, and
+		// naming the family with -c makes tsdecrypt take the last descriptor
+		// in the PMT, which need not be the one the card holds. The server
+		// then answers "Card was not able to decode the channel", which reads
+		// like an entitlement problem on the provider's side and is not one.
+		if (preg_match('/Card info:\s*CAID\s*(0x[0-9a-f]{1,4})/i', $rLog, $rCard) === 1
+			&& preg_match('/ECM CAID:\s*(0x[0-9a-f]{1,4})/i', $rLog, $rEcm) === 1
+			&& strcasecmp(trim($rCard[1]), trim($rEcm[1])) !== 0) {
+			return 'CAID mismatch: the card server holds ' . $rCard[1]
+				. ' but tsdecrypt is sending it ECMs for ' . $rEcm[1]
+				. '. This carrier advertises more than one CA system, so choosing the CA system by'
+				. ' name is not enough. Set the CAID field on this CAMD profile to ' . $rCard[1]
+				. ' and the right ECM PID will be used.' . $rTail;
+		}
+
 		$rSignatures = [
 			'no such user'  => 'The CAMD server has no such username.',
 			'doesnt exist'  => 'The CAMD server has no such username.',
@@ -550,6 +579,9 @@ class DvbDecryptRunner {
 			'login fail'    => 'The CAMD server rejected the login. For NEWCAMD a wrong DES key looks exactly like a wrong password, so check both.',
 			'bad password'  => 'The CAMD server rejected the password.',
 			'rejected'      => 'The CAMD server rejected this client.',
+			'not able to decode' => 'The card server received the ECMs but could not decode them.'
+				. ' Either the CAID being sent is not the one the card holds, or the account has no'
+				. ' entitlement for this provider.',
 		];
 
 		foreach ($rSignatures as $rNeedle => $rWhy) {
