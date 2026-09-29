@@ -1598,3 +1598,26 @@ Causal note, because it was briefly got wrong: a rejected login is a complete
 and sufficient explanation for "the server never asks for an ECM". The ECM
 loop is downstream of `MSG_CLIENT_2_SERVER_LOGIN_ACK`. No CA-system theory is
 needed until the account exists and the login succeeds.
+
+## Correction: the newcamd traffic was never ours
+
+Two turns were spent analysing OSCam log lines showing a client `rubengt`
+being rejected from `190.143.242.57`, on the assumption it was this module's
+tsdecrypt. It was not.
+
+`DvbDecryptRunner::workDir()` and `DvbStreamRunner::workDir()` both resolve to
+`CACHE_TMP_PATH/dvb/`, and tsdecrypt's pidfile and log live there. That
+directory did not exist on the node, which proves neither dvblast nor
+tsdecrypt had ever been launched by the panel. The rejected logins came from
+something else sharing the same public address — the Cesbo Astra install, a
+receiver, anything on that LAN.
+
+The lesson is cheap to state and was expensive here: **a NAT address is not an
+identity.** Before attributing traffic to a component, confirm the component
+has ever run. `stream-debug.sh` answers that in its first section, and it was
+available before the analysis started.
+
+None of the protocol notes above are wrong, and the account and CAID advice
+still applies once the chain runs. But the live blocker was never decryption:
+dvblast does not start, so there is no transport stream, so no decryptor is
+ever spawned, so nothing connects to the card server.
