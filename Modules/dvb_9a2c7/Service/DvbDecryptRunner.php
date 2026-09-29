@@ -161,7 +161,8 @@ class DvbDecryptRunner {
 		// ever, which the server sees as a flood and may ban. Counting in a
 		// separate pass matters: a row further down the list is already
 		// holding a session when an earlier row asks for one.
-		$rLive = [];
+		$rLive      = [];
+		$rCamdCache = [];
 
 		foreach ($rRows as $rService) {
 			if (!empty($rService['camd_id']) && self::isRunning((int) $rService['id'])) {
@@ -202,7 +203,17 @@ class DvbDecryptRunner {
 				continue;
 			}
 
-			$rCamd = DvbCamdService::find((int) $rService['camd_id']);
+			// Every service on a transponder usually points at the same profile,
+			// so look it up once per pass rather than once per service. This
+			// only bites when decryptors are failing and the loop reaches here
+			// on every row -- which is exactly when the node is busiest.
+			$rCamdKeyLookup = (int) $rService['camd_id'];
+
+			if (!array_key_exists($rCamdKeyLookup, $rCamdCache)) {
+				$rCamdCache[$rCamdKeyLookup] = DvbCamdService::find($rCamdKeyLookup);
+			}
+
+			$rCamd = $rCamdCache[$rCamdKeyLookup];
 
 			if ($rCamd === null || empty($rCamd['enabled'])) {
 				self::record($rID, 'error', 'Its CAMD server is missing or disabled.');

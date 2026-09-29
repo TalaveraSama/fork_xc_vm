@@ -31,7 +31,13 @@ class DvbCamdService {
 		$db = self::db();
 
 		$db->query(
-			'SELECT c.*, (SELECT COUNT(*) FROM `dvb_services` s WHERE s.`camd_id` = c.`id`) AS `service_count`
+			// running_count is the number that actually hold a session right
+			// now. Assigned and running are very different numbers when a
+			// card line runs out of sessions, and only seeing the first one
+			// leaves an operator guessing why most channels are black.
+			'SELECT c.*,
+			        (SELECT COUNT(*) FROM `dvb_services` s WHERE s.`camd_id` = c.`id`) AS `service_count`,
+			        (SELECT COUNT(*) FROM `dvb_services` s WHERE s.`camd_id` = c.`id` AND s.`decrypt_status` = \'running\') AS `running_count`
 			 FROM `dvb_camd` c ORDER BY c.`name` ASC, c.`id` ASC;'
 		);
 

@@ -1894,3 +1894,32 @@ be clamped by `net.core.rmem_max` if that is left at the distribution default.
 
 Only new imports get the tuned URL. Existing channels keep the source string
 stored at import time and have to be edited or re-imported.
+
+## 2.6.6 — session visibility, and why only one channel opens
+
+Reported symptom: 19 connections visible for the newcamd user on OSCam, but
+only one channel plays.
+
+That shape is not a session *limit*. A limit refuses the surplus and leaves
+the earlier sessions working. Nineteen connections churning while exactly one
+channel decrypts is what `uniq` does in OSCam: with `uniq = 1` (or 2/3) each
+new login for the same account disconnects the previous one, so twenty-one
+tsdecrypt processes take turns kicking each other off and only whichever
+logged in last holds a usable session. The account needs `uniq = 0`.
+
+The structural point behind it stands either way: descrambling is per service,
+so twenty-one encrypted channels mean twenty-one CAMD logins. A single local
+OSCam acting as a proxy collapses that to one upstream session and serves all
+of them locally, which is the right shape for this many channels.
+
+Panel changes here are about seeing it. `DvbCamdService::all()` now also
+counts services whose `decrypt_status` is `running`, and the CAMD list shows
+`running / assigned` with the cap underneath and an explicit "N not
+decrypting" when the two disagree. Assigned and running are very different
+numbers once a line runs out of sessions, and showing only the first left the
+operator guessing.
+
+`supervise()` also caches the CAMD row per pass instead of calling
+`DvbCamdService::find()` once per service. It only reaches that line when a
+decryptor is not already running, so the saving is nil in steady state and
+twenty-one identical queries a minute exactly when the node is thrashing.

@@ -219,7 +219,25 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 														<br><small class="text-muted">CAID <?php echo htmlspecialchars((string) $rCamd['caid'], ENT_QUOTES); ?></small>
 													<?php endif; ?>
 												</td>
-												<td class="text-center"><?php echo (int) $rCamd['service_count']; ?></td>
+												<td class="text-center">
+													<?php
+													$rRun = (int) ($rCamd['running_count'] ?? 0);
+													$rAll = (int) $rCamd['service_count'];
+													$rCap = (int) ($rCamd['max_connections'] ?? 0);
+													?>
+													<span class="badge badge-<?php echo ($rRun > 0 && $rRun < $rAll) ? 'warning' : 'secondary'; ?>"
+														title="<?php echo $rRun; ?> of <?php echo $rAll; ?> assigned services currently hold a session<?php echo $rCap > 0 ? ', cap ' . $rCap : ''; ?>">
+														<?php echo $rRun; ?> / <?php echo $rAll; ?>
+													</span>
+													<?php if ($rCap > 0): ?>
+														<small class="text-muted d-block">cap <?php echo $rCap; ?></small>
+													<?php endif; ?>
+													<?php if ($rRun > 0 && $rRun < $rAll): ?>
+														<small class="d-block text-warning">
+															<?php echo $rAll - $rRun; ?> not decrypting
+														</small>
+													<?php endif; ?>
+												</td>
 												<td class="text-center">
 													<?php if (!empty($rCamd['enabled'])): ?>
 														<span class="badge badge-success">Enabled</span>
