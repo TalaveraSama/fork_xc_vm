@@ -303,6 +303,22 @@ routes 1 and 2 are now both dead ends here — the fork has a single commit and
 no `bin/` anywhere — so **route 3 is the only one**, which is why running the
 base mirror before the build is not optional.
 
+## 2.4.2 is current
+
+Published 2026-09-29, stable, and what `releases/latest` returns:
+`xc_vm.tar.gz` 188,666,041 B, `XC_VM.zip` 187,802,953 B, `hashes.md5` 89 B.
+Verified installing on debian_11/12/13 and ubuntu_20/22/24, deploy tree 6157
+files, binaries mirror `binaries-29062026`. Base layer `base-2.4.2` is the
+same 174,180,187 B upstream-2.3.9 archive as every base before it.
+
+It exists for a reason worth remembering: the two fixes in it -- the
+undefined array key warnings and the Flussonic import that never started
+its channels -- had been applied to the live server by hand, and the panel's
+own Update button reverted both. `update` replaces everything outside
+`bin/*`, `content`, `backups`, `tmp`, `config` and `signals`, and `Modules/`
+is not on that list. **A hand-patched file survives exactly until the next
+update.** Hotfix by curl to see whether a fix works; cut a release to keep it.
+
 ## Faults found on the real server, and why the fixes matter
 
 Reverting any of these puts the panel back in a state that looks installed
