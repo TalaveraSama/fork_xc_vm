@@ -399,12 +399,36 @@ class DvbStreamRunner {
 		// service on this carrier is being decrypted the ECM and EMM streams
 		// have to survive the remux. Without these two flags tsdecrypt starts
 		// cleanly, connects to the CAMD, and then never receives a single ECM.
+		$rAnyDecrypt = false;
+		$rAnyEmm     = false;
+
 		foreach ($rServices as $rCheck) {
-			if (self::decrypting($rCheck)) {
-				$rArgs[] = '-Y';
-				$rArgs[] = '-W';
+			if (!self::decrypting($rCheck)) {
+				continue;
+			}
+
+			$rAnyDecrypt = true;
+			$rCheckCamd  = DvbCamdService::find((int) $rCheck['camd_id']);
+
+			if ($rCheckCamd !== null && !empty($rCheckCamd['emm'])) {
+				$rAnyEmm = true;
 				break;
 			}
+		}
+
+		if ($rAnyDecrypt) {
+			$rArgs[] = '-Y';
+		}
+
+		// EMM passthrough only when a CAMD profile actually asked for it.
+		// Passing it unconditionally pushes every entitlement message on the
+		// mux into every tsdecrypt: one carrier measured 76,603 EMMs in sixty
+		// seconds, which overflowed tsdecrypt's queue, drew "EMM rejected by
+		// card" from the server, and delayed control words by up to eighteen
+		// seconds. The picture stutters and the cause looks like a weak
+		// signal. A card with no AU rights cannot use them at all.
+		if ($rAnyEmm) {
+			$rArgs[] = '-W';
 		}
 
 		if (in_array($rDelsys, ['DVBS', 'DVBS2'], true)) {

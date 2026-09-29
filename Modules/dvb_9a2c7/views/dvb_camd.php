@@ -144,7 +144,14 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 									<input type="checkbox" class="custom-control-input" id="camd-emm" name="emm" value="1"
 										<?php echo !empty($rEditing['emm']) ? 'checked' : ''; ?>>
 									<label class="custom-control-label" for="camd-emm">
-										Forward EMMs <small class="text-muted">&mdash; keeps card entitlements updated. Off unless the provider asks for it.</small>
+										Forward EMMs
+										<small class="text-danger d-block">
+											Leave this off unless the provider asks for it. A busy mux carries tens of
+											thousands of EMMs a minute, and forwarding them floods the card server:
+											one measured carrier produced 76,603 in sixty seconds, which delayed
+											control words by up to eighteen seconds and made every channel stutter.
+											If the card reports Admin=NO it has no AU rights and cannot use them at all.
+										</small>
 									</label>
 								</div>
 								<div class="custom-control custom-checkbox mb-1">

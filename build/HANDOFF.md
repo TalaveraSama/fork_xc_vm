@@ -1950,3 +1950,33 @@ which is the different problem of ECMs arriving and being refused.
 
 This is the hardest failure to see from outside, because on the card server it
 looks like a perfectly healthy idle session rather than an error.
+
+## 2.6.8 — the EMM flood, which was mine
+
+The decryptor logs finally explained both the stutter and the dead channels:
+
+    WRN | Too many items (10012) in EMM queue, dropping the oldest.
+          Consider switching to cs378x protocol!
+    EMM | Received 76603, Skipped 91, Sent 25, Processed 21 in 60 seconds.
+    CWC | SID 0x00e0 EcmTime: 9996 ms CW_time: 18164 ms
+
+Seventy-six thousand EMMs a minute, per decryptor. The card server answered
+with `EMM rejected by card`, `Failed to read message` and
+`EMM unexpected server response`, its client list filled with
+`timeout (5000 ms)`, and control words arrived up to eighteen seconds late.
+That is the stutter, and on a saturated node it is also why several decryptors
+only ever logged `Input read timeout`.
+
+`buildCommand()` added `-Y` and `-W` together whenever any service on the
+carrier was decrypting. `-Y/--ecm-passthrough` is always needed. `-W/--emm-passthrough`
+is not: it is only useful when a CAMD profile has EMM forwarding switched on,
+and the account here reports `Admin=NO`, meaning no AU rights, so the EMMs
+could never have been used. They now travel only when some decrypting
+service's profile actually asks for them.
+
+tsdecrypt's own warning recommends cs378x for EMM-heavy setups, which is
+another argument for the local OSCam proxy: one upstream session, EMM handling
+in one place, and control words cached out of the critical path.
+
+The EMM checkbox now carries the numbers rather than a vague "off unless the
+provider asks for it".
