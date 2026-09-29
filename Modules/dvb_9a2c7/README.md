@@ -76,10 +76,18 @@ To descramble encrypted services you also need **`tsdecrypt`**, which most
 distributions do not package:
 
 ```sh
-apt-get install build-essential git libssl-dev
+apt-get install build-essential git libssl-dev libdvbcsa-dev
 git clone https://github.com/gfto/tsdecrypt.git
-cd tsdecrypt && git submodule update --init --recursive && make && make install
+cd tsdecrypt
+git submodule update --init --recursive
+make && make install
 ```
+
+`libdvbcsa-dev` is not optional with a plain `make`: that is the descrambling
+library tsdecrypt links against by default. The alternative is `make ffdecsa`,
+which uses the copy of FFdecsa shipped in the source tree and needs no external
+library — it is up to 40% faster on older CPUs but slower for file input, which
+is not how this module uses it. Either works.
 
 It is only needed on the tuner node, and only if you actually have a card
 server. Free-to-air services never touch it.
