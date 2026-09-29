@@ -1097,3 +1097,50 @@ That is why GeoIP downloaded fine in the same install while the proxy did not.
 
 This disappears entirely once `TalaveraSama/XC_VM_Proxy` exists and is public,
 but the fallback has to work regardless — that is what it is for.
+
+### 2.4.9 — `console.php startup` must run as root, not as xc_vm
+
+Found while installing a tuner node on a real box: the installer stopped and
+asked for a password.
+
+    ==> Registering the DVB worker in cron
+    [sudo] password for xc_vm:
+
+The prompt names xc_vm as the *invoking* user, so a second sudo was running
+inside a process already dropped to xc_vm. `StartupCommand` shells out to
+`sudo crontab -l/-r/<file>` to install the root crontab, and the panel
+installer explicitly removes `/etc/sudoers.d/xc_vm` (build/install:2609), so
+xc_vm has no passwordless sudo and that inner call can never succeed. The
+prompt is visible despite `>/dev/null 2>&1` because sudo writes it straight to
+the terminal.
+
+Running startup as root is the supported path, not merely a workaround.
+`StartupCommand:147` picks the prefix of every generated cron line from its own
+euid:
+
+    $rPrefix = (euid is root) ? 'sudo -u xc_vm ' : '';
+
+As root it writes `sudo -u xc_vm php ... cron:dvb` into root's crontab, which
+is correct. As xc_vm it would write the line unprefixed. So running it as the
+wrong user breaks two things at once: the crontab is not written at all, and
+the lines it would have written are wrong.
+
+`build/install:2864` and `ServiceCommand.php:77` already ran it as root. Three
+places did not, and all three are fixed:
+
+  * `Modules/dvb_9a2c7/install-tuner-node.sh`
+  * `Cli/Commands/LbInstallFlow.php:228`   — streaming node install over SSH
+  * `Cli/Commands/ProxyInstallFlow.php:79` — proxy node install over SSH
+
+The two SSH ones are the worse half of this. Both connect as root (the
+credentials are stored as `root_username`/`root_password`) and both run plenty
+of other `sudo` commands, but for startup they dropped to xc_vm. Over a
+non-interactive SSH channel the sudo prompt gets no answer, so **every node
+installed through the panel came up with no crontab at all** — no cron:dvb, and
+nothing in the output saying so. That is exactly the silent-queue failure the
+2.4.5 notes warn about: the panel writes rows into `dvb_jobs` and nothing ever
+runs them.
+
+Grep to keep it fixed:
+
+    grep -rn "sudo -u xc_vm.*console.php startup" --include=*.php --include=*.sh .

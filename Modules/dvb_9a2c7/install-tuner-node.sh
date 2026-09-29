@@ -162,7 +162,16 @@ else
 	# StartupCommand rewrites the whole crontab from the module manifests, so
 	# this is the supported way to get cron:dvb in. Editing the crontab by hand
 	# works until the next startup wipes it.
-	sudo -u "$PANEL_USER" "$PHP_BIN" "$(echo "$MAIN_HOME/console.php" | tr -s /)" startup >/dev/null 2>&1 || true
+	#
+	# Run it as root, not as $PANEL_USER. StartupCommand shells out to
+	# "sudo crontab" to install the root crontab, and it decides the prefix of
+	# every cron line from its own euid: as root it writes
+	# "sudo -u xc_vm php ... cron:dvb", as xc_vm it writes the line unprefixed.
+	# Running it as xc_vm therefore does two wrong things at once -- the inner
+	# sudo has no password (the panel installer deliberately removes
+	# /etc/sudoers.d/xc_vm) so the crontab is never written, and the lines it
+	# would write are wrong anyway. Matches build/install and ServiceCommand.
+	"$PHP_BIN" "$(echo "$MAIN_HOME/console.php" | tr -s /)" startup >/dev/null 2>&1 || true
 
 	if crontab -l 2>/dev/null | grep -q 'cron:dvb'; then
 		ok "cron:dvb is in the crontab"
