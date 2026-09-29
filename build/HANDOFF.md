@@ -1528,3 +1528,34 @@ and tsdecrypt, which buys reuse and costs two extra failure modes — ECMs must
 survive the remux, and the descrambler must be told the right CA system.
 Neither is a defect in the design, but both are invisible unless something
 looks at the actual command lines, which is what this script is for.
+
+## 2.6.0 — the supervisor knew why, and told nobody
+
+`stream-debug.sh` answered in its first section: `/home/xc_vm/tmp/dvb` did not
+exist. `DvbStreamRunner::start()` calls `ensureWorkDir()` before writing the
+DVBlast config, so a missing directory means start() returned through one of
+its four early exits and dvblast was never launched. No producer, hence no UDP
+anywhere, hence a black channel — and none of that is a decryption problem.
+
+The four exits are very different from each other:
+
+    No services imported from this transponder; nothing to stream.
+    <the unsupported() blocker: multistream, or a non-universal LNB>
+    dvblast not found on this node. Install it (apt-get install dvblast).
+    No tuner available on this node. Run Discover adapters first.
+
+`supervise()` files the right one in `stream_message` every time. Nothing
+showed it. `cron:dvb` printed `0 started, 0 stopped, 1 failed`, and the
+transponder list rendered a red `error` badge with the reason buried in a
+`title=` attribute, visible only on hover. Both supervisors now return a
+`messages` array that `cron:dvb` prints one per line, and the transponder list
+prints the message under the badge instead of hiding it in a tooltip.
+
+Running `console.php cron:dvb` by hand is now a real diagnostic:
+
+    /home/xc_vm/bin/php/bin/php /home/xc_vm/console.php cron:dvb
+
+This is the same fault as 2.5.2's signal meter, 2.5.6's busy frontend and
+2.5.8's "running" decryptor: the module knew the answer and the interface
+showed a status code instead. Worth treating as a standing rule — any branch
+that records a reason must also have a path that displays it.

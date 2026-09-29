@@ -149,7 +149,7 @@ class DvbDecryptRunner {
 		);
 
 		$rRows   = $db->num_rows() > 0 ? $db->get_rows() : [];
-		$rCounts = ['started' => 0, 'stopped' => 0, 'failed' => 0];
+		$rCounts = ['started' => 0, 'stopped' => 0, 'failed' => 0, 'messages' => []];
 		$rKnown  = [];
 
 		// Count live sessions per CAMD before starting anything. NEWCAMD lines
@@ -205,6 +205,7 @@ class DvbDecryptRunner {
 			if ($rCamd === null || empty($rCamd['enabled'])) {
 				self::record($rID, 'error', 'Its CAMD server is missing or disabled.');
 				$rCounts['failed']++;
+				$rCounts['messages'][] = 'service ' . $rID . ': its CAMD server is missing or disabled.';
 				continue;
 			}
 
@@ -229,6 +230,8 @@ class DvbDecryptRunner {
 
 			if ($rResult['status']) {
 				$rLive[$rCamdKey] = ($rLive[$rCamdKey] ?? 0) + 1;
+			} else {
+				$rCounts['messages'][] = 'service ' . $rID . ': ' . $rResult['message'];
 			}
 
 			if ($rResult['status']) {

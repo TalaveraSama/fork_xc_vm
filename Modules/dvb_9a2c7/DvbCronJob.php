@@ -296,6 +296,10 @@ class DvbCronJob implements CommandInterface {
 			);
 		}
 
+		foreach ($rCounts['messages'] ?? [] as $rWhy) {
+			echo '[dvb]   ' . $rWhy . "\n";
+		}
+
 		// Decryptors are reconciled after the tuners, not before: tsdecrypt
 		// reads what DVBlast produces, so starting one for a transponder that
 		// is still coming up just burns a CAMD session on a dead input.
@@ -308,6 +312,10 @@ class DvbCronJob implements CommandInterface {
 				$rCrypt['stopped'],
 				$rCrypt['failed']
 			);
+		}
+
+		foreach ($rCrypt['messages'] ?? [] as $rWhy) {
+			echo '[dvb]   ' . $rWhy . "\n";
 		}
 	}
 

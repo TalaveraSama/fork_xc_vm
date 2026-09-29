@@ -175,7 +175,7 @@ class DvbStreamRunner {
 	 * then a PID check per transponder that is supposed to be streaming.
 	 *
 	 * @param int $rServerID This node.
-	 * @return array{started:int,stopped:int,failed:int}
+	 * @return array{started:int,stopped:int,failed:int,messages:string[]}
 	 */
 	public static function supervise($rServerID) {
 		$db = self::db();
@@ -186,7 +186,10 @@ class DvbStreamRunner {
 		);
 
 		$rRows    = $db->num_rows() > 0 ? $db->get_rows() : [];
-		$rCounts  = ['started' => 0, 'stopped' => 0, 'failed' => 0];
+		// Carrying the reasons out of here matters: record() files them in
+		// stream_message, but an operator running cron:dvb by hand sees only
+		// the counters, and "1 failed" is not a diagnosis.
+		$rCounts  = ['started' => 0, 'stopped' => 0, 'failed' => 0, 'messages' => []];
 
 		foreach ($rRows as $rTransponder) {
 			$rID = (int) $rTransponder['id'];
@@ -212,6 +215,9 @@ class DvbStreamRunner {
 				$rCounts['started']++;
 			} else {
 				$rCounts['failed']++;
+				$rCounts['messages'][] = 'transponder ' . $rID
+					. ' (' . trim((string) ($rTransponder['name'] ?? '')) . '): '
+					. $rResult['message'];
 			}
 		}
 

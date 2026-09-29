@@ -191,7 +191,15 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 												<?php if ($rRow['stream_status'] === 'running'): ?>
 													<span class="badge badge-success" title="<?php echo htmlspecialchars((string) $rRow['stream_message'], ENT_QUOTES); ?>">on air</span>
 												<?php elseif ($rRow['stream_status'] === 'error'): ?>
-													<span class="badge badge-danger" title="<?php echo htmlspecialchars((string) $rRow['stream_message'], ENT_QUOTES); ?>">error</span>
+													<span class="badge badge-danger">error</span>
+												<?php if (trim((string) $rRow['stream_message']) !== ''): ?>
+													<?php // A tooltip is where a reason goes to die. The supervisor
+													// already knows exactly why this carrier will not start, so
+													// say it on the page. ?>
+													<div class="small text-danger mt-1" style="white-space:normal;max-width:320px;">
+														<?php echo htmlspecialchars((string) $rRow['stream_message'], ENT_QUOTES); ?>
+													</div>
+												<?php endif; ?>
 												<?php else: ?>
 													<span class="badge badge-secondary">off</span>
 												<?php endif; ?>
