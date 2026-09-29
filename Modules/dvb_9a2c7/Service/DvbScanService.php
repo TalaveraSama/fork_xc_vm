@@ -541,6 +541,13 @@ class DvbScanService {
 			return 'That frontend is busy — something else is already tuned to it (a running dvblast, or another scan). Free it and retry.';
 		}
 
+		// A rejected command line has nothing to do with the antenna. Without
+		// this the message below blames the dish for a typo in a flag, which
+		// is how '-t 2' survived several releases.
+		if (stripos($rLog, 'invalid option') !== false || stripos($rLog, 'unrecognized option') !== false) {
+			return 'The tuner program rejected its own command line — this is a bug in the module, not a problem with your dish. Raw output: ' . substr($rLog, 0, 300);
+		}
+
 		if (stripos($rLog, 'Permission denied') !== false) {
 			return 'Permission denied on the tuner device. The xc_vm user needs to be in the `video` group.';
 		}

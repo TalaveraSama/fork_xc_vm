@@ -29,6 +29,7 @@ LNB=${LNB:-UNIVERSAL}
 DISEQC=${DISEQC:-}
 SECS=${SECS:-5}
 
+BUSY=0
 WORK=$(mktemp -d /tmp/dvbsig.XXXXXX) || exit 1
 trap 'rm -rf "$WORK"' EXIT
 
@@ -66,10 +67,21 @@ if [ ! -e "$FE" ]; then
 fi
 if command -v fuser >/dev/null 2>&1; then
 	if fuser -v "$FE" 2>&1 | grep -q .; then
-		printf '  BUSY - something already holds the frontend:\n'
+		BUSY=1
+		printf '  BUSY - something already holds the frontend:\n\n'
 		fuser -v "$FE" 2>&1 | sed 's/^/    /'
-		printf '\n  Stop it (a running stream, the panel meter, or a stray\n'
-		printf '  dvbv5-zap) and run this again.\n'
+		printf '\n  Every test below would fail with "Device or resource busy"\n'
+		printf '  and would tell you nothing about your dish, so this stops here.\n\n'
+		for pid in $(fuser "$FE" 2>/dev/null); do
+			printf '  PID %s is:\n' "$pid"
+			ps -o pid=,user=,etime=,cmd= -p "$pid" 2>/dev/null | sed 's/^/    /'
+			svc=$(ps -o comm= -p "$pid" 2>/dev/null)
+			if [ -n "$svc" ] && command -v systemctl >/dev/null 2>&1; then
+				printf '    systemctl status %s   # if this is a service, stop and disable it\n' "$svc"
+			fi
+		done
+		printf '\n  Free the tuner and run this again, or set FORCE=1 to test anyway.\n'
+		[ -z "${FORCE:-}" ] && exit 1
 	else
 		printf '  free\n'
 	fi
@@ -228,6 +240,12 @@ if [ "$LOCKED" = "1" ]; then
 	printf 'RESULT: something locked. Copy the winning values into the panel.\n'
 else
 	printf 'RESULT: nothing locked.\n\n'
+	if grep -qi 'Device or resource busy' "$WORK"/*.log 2>/dev/null; then
+		printf 'The frontend was busy for these tests, so they say NOTHING about\n'
+		printf 'your dish. Free the tuner and run this again.\n'
+		rule
+		exit 1
+	fi
 	printf 'If a level was reported but never a lock, the dish and LNB are alive\n'
 	printf 'and the frequency, symbol rate or LNB band is wrong. If every attempt\n'
 	printf 'showed no level at all, suspect LNB power, cabling, the DiSEqC port,\n'

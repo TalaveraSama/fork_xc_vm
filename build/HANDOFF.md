@@ -1372,3 +1372,34 @@ Not a fault, worth recording: `ERROR FE_SET_VOLTAGE: Operation not permitted`
 is noise `dvb-fe-tool` prints on exit on TBS cards, present on cards that lock
 perfectly (tbsdtv/linux_media#401). And `MODULATION` has no `AUTO` value,
 though `INNER_FEC` does.
+
+## 2.5.6 — proof for 2.5.5, and a bench that stops lying when the tuner is busy
+
+The 2.5.5 bench confirmed the `-t 2` diagnosis outright:
+
+    7a. the old panel command, with -t 2 (expected to FAIL)
+        dvbv5-scan: invalid option -- 't'
+        [exit 255]
+
+That run also exposed a different problem. `fuser` reported the frontend held
+by a process named `astra` (Cesbo Astra, the software this module exists to
+replace), so all seven zap attempts returned `Device or resource busy` and the
+script still finished with "suspect LNB power, cabling, the DiSEqC port, or
+dish alignment". It had already detected the real cause in section 3 and then
+blamed the antenna anyway.
+
+`signal-debug.sh` now stops as soon as it finds the frontend busy, prints
+`ps` for each holding PID and the `systemctl status` line to investigate it,
+and exits 1. `FORCE=1` overrides. If a `Device or resource busy` shows up in
+any attempt log, the final verdict says the run proves nothing about the dish
+instead of offering antenna advice. Both directions were exercised against a
+fake `fuser`: busy exits 1 before any test, free proceeds.
+
+`explainFailure()` gained a branch for `invalid option` / `unrecognized
+option`, which reports a module bug rather than a tuning problem. Its
+`Device or resource busy` branch was already correct and already ordered ahead
+of the generic "never locked" text, so the panel itself would have named the
+conflict properly.
+
+Operationally: Cesbo Astra must be stopped and disabled on that node, or it
+will keep claiming tuners the module wants.
