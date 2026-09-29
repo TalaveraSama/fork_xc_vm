@@ -1471,3 +1471,28 @@ Two configuration traps this exposed, both in `dvb_camd`:
   under that default. Setting `caid` is the better fix: `buildCommand()` emits
   `-C <caid>` when it is present and only falls back to `-c <ca_system>` when
   it is empty.
+
+## 2.5.9 — one encrypted channel is one CAMD session
+
+The CAMD server's log reads `SID:CAID@provider`, one connection per channel:
+
+    02CB:1802@000000
+
+Two of those service ids match services imported from the transponder
+(`010F` = 271, `02A0` = 672), and `1802` is Nagravision, which is why a profile
+left on the `CONAX` default decrypts nothing. Filling in `caid` is the better
+fix than changing `ca_system`: `buildCommand()` emits `-C <caid>` when it is
+set and only falls back to `-c <ca_system>` when it is empty.
+
+The header comment of `DvbDecryptRunner` already warned that "a CAMD line with
+a session limit will notice", but nothing enforced it. Twenty-one encrypted
+channels means twenty-one simultaneous logins; the server rejects the surplus,
+and a rejected tsdecrypt reconnects for ever, which looks like a flood and can
+get the address banned.
+
+`dvb_camd` gains `max_connections` (0 = no cap, the previous behaviour) via
+`migrations/1.3.0.sql`. `supervise()` counts live sessions per CAMD in a
+separate pass before starting anything -- necessary because a row further down
+the list already holds a session when an earlier row asks for one -- and holds
+the surplus back with a message naming the cap instead of letting the server
+refuse it.

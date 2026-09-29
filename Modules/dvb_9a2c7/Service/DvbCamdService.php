@@ -19,7 +19,7 @@ class DvbCamdService {
 	/** Columns accepted from the admin form. */
 	private const FIELDS = [
 		'name', 'protocol', 'host', 'port', 'username', 'password', 'des_key',
-		'ca_system', 'caid', 'emm', 'input_buffer', 'mute_on_error', 'enabled', 'notes',
+		'ca_system', 'caid', 'emm', 'input_buffer', 'max_connections', 'mute_on_error', 'enabled', 'notes',
 	];
 
 	/**
@@ -128,6 +128,9 @@ class DvbCamdService {
 		$rRow['mute_on_error'] = !empty($rRow['mute_on_error']) ? 1 : 0;
 		$rRow['enabled']       = !empty($rRow['enabled']) ? 1 : 0;
 		$rRow['input_buffer']  = max(0, min(10000, (int) ($rRow['input_buffer'] ?? 0)));
+		// 0 means no cap, which is how every profile behaved before the
+		// column existed.
+		$rRow['max_connections'] = max(0, min(1000, (int) ($rRow['max_connections'] ?? 0)));
 
 		if (trim((string) ($rRow['name'] ?? '')) === '') {
 			$rRow['name'] = $rRow['host'] . ':' . $rRow['port'];

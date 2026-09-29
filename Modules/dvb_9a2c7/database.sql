@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS `dvb_camd` (
   `caid` varchar(16) COLLATE utf8_unicode_ci DEFAULT NULL,
   `emm` tinyint(1) NOT NULL DEFAULT 0,
   `input_buffer` int(11) NOT NULL DEFAULT 0,
+  `max_connections` int(11) NOT NULL DEFAULT 0,
   `mute_on_error` tinyint(1) NOT NULL DEFAULT 1,
   `enabled` tinyint(1) NOT NULL DEFAULT 1,
   `notes` text COLLATE utf8_unicode_ci,

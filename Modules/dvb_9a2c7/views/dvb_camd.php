@@ -126,6 +126,16 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 									the picture breaks up every few seconds, then try 1000.
 								</small>
 							</div>
+							<div class="form-group">
+								<label>Max simultaneous connections</label>
+								<input type="number" name="max_connections" class="form-control" min="0" max="1000"
+									value="<?php echo (int) ($rEditing['max_connections'] ?? 0); ?>">
+								<small class="form-text text-muted">
+									One encrypted channel is one CAMD session. Set this to the session
+									limit of your line and the surplus is held back with a clear reason
+									instead of being rejected in a reconnect loop. 0 means no cap.
+								</small>
+							</div>
 
 							<div class="form-group">
 								<div class="custom-control custom-checkbox mb-1">

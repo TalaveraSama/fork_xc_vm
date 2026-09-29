@@ -152,6 +152,22 @@ class DvbDecryptRunner {
 		$rCounts = ['started' => 0, 'stopped' => 0, 'failed' => 0];
 		$rKnown  = [];
 
+		// Count live sessions per CAMD before starting anything. NEWCAMD lines
+		// are sold with a session limit and descrambling is per service, so a
+		// transponder carrying more encrypted channels than the account allows
+		// gets the surplus rejected -- and a rejected tsdecrypt reconnects for
+		// ever, which the server sees as a flood and may ban. Counting in a
+		// separate pass matters: a row further down the list is already
+		// holding a session when an earlier row asks for one.
+		$rLive = [];
+
+		foreach ($rRows as $rService) {
+			if (!empty($rService['camd_id']) && self::isRunning((int) $rService['id'])) {
+				$rKey         = (int) $rService['camd_id'];
+				$rLive[$rKey] = ($rLive[$rKey] ?? 0) + 1;
+			}
+		}
+
 		foreach ($rRows as $rService) {
 			$rID          = (int) $rService['id'];
 			$rKnown[$rID] = true;
@@ -192,8 +208,28 @@ class DvbDecryptRunner {
 				continue;
 			}
 
+			$rCamdKey = (int) $rService['camd_id'];
+			$rCap     = (int) ($rCamd['max_connections'] ?? 0);
+
+			if ($rCap > 0 && ($rLive[$rCamdKey] ?? 0) >= $rCap) {
+				self::record(
+					$rID,
+					'error',
+					'Not started: ' . $rCamd['name'] . ' is capped at ' . $rCap
+					. ' simultaneous connection(s) and they are all in use. Every encrypted'
+					. ' channel needs its own CAMD session, so either raise the cap, raise the'
+					. ' limit on the account, or decrypt fewer channels at once.'
+				);
+				$rCounts['failed']++;
+				continue;
+			}
+
 			$rResult = self::start($rService, $rCamd);
 			self::record($rID, $rResult['status'] ? 'running' : 'error', $rResult['message']);
+
+			if ($rResult['status']) {
+				$rLive[$rCamdKey] = ($rLive[$rCamdKey] ?? 0) + 1;
+			}
 
 			if ($rResult['status']) {
 				$rCounts['started']++;
