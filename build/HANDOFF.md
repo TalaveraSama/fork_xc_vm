@@ -912,3 +912,45 @@ does not separate HTML from PHP when tracking quotes: a lone apostrophe in plain
 HTML text (`the card's inputs`) is reported as `unterminated ' string`, and an
 even number of them can mask a real error. Keep apostrophes out of HTML text in
 views, or the tool stops being a usable signal.
+
+### 2.4.5 — DVB import and DVBlast streaming
+
+The scanner from the previous entry now has the other half. Importing a service
+allocates a UDP port on the tuner node, creates a `streams` row sourced from
+`udp://127.0.0.1:<port>`, pins it to that node in `streams_servers`, and queues
+a `restream` job. One DVBlast per transponder tunes the carrier once and fans
+every imported service out to its own port.
+
+Loopback is the default output on purpose: the channel runs on the machine that
+holds the card, so there is no multicast to route and nothing on the wire. The
+transponder's `output_host` accepts a 239.x.y.z group for the rare case where a
+second machine needs the same services.
+
+A supervisor runs on every `cron:dvb` tick and restarts whatever should be
+streaming and is not. That, not the job queue, is what brings channels back
+after the tuner node reboots.
+
+**Failure modes closed deliberately, each of which is silent if left open:**
+
+- A scan will not claim a tuner that is feeding a live transponder. Without the
+  guard the scan wins, every channel on that carrier drops, and the operator
+  sees only "device busy" on the scan with no hint of what they broke.
+- `stopstream` works from the job's `ref_id` alone, so the stop queued by
+  `delete()` still reaps DVBlast after the transponder row is gone. Treating the
+  missing row as an error would strand a process holding a tuner for ever.
+- `housekeep()` releases `dvb_adapters.in_use_by` whose owner is neither
+  scanning nor running — a stale claim is indistinguishable from a live one at
+  the point of use, so a crashed run would otherwise cost a tuner until reboot.
+- Multistream (ISI/PLS) carriers and non-universal LNBs are refused with a
+  reason. DVBlast can express neither; tuning them anyway produces a confident
+  lock on the wrong frequency.
+- DiSEqC is converted per tool: dvbv5 counts satellites from 0, DVBlast from 1.
+  The stored value is what an operator says (1-4). Getting this wrong gives a
+  healthy lock on the wrong satellite.
+- Process signals are numeric (15/9) via `ProcessManager::kill()`. `SIGTERM` and
+  `SIGKILL` come from pcntl, not posix, so naming them would make killing a
+  tuner process fatal on a build without that extension.
+
+Ports are allocated monotonically per node from 10000 and never reused: a dying
+DVBlast still writing to a reclaimed port would briefly show the old channel on
+a new one.
