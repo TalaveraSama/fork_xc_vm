@@ -214,7 +214,13 @@ class DvbScanService {
 			}
 		}
 
-		$rArgs[] = escapeshellarg('CHANNEL');
+		// Monitor mode matches on the FREQUENCY, not on the section name:
+		// "dvbv5-zap [OPTION]... frequency-name (for monitor or all PIDs
+		// mode)", and the manual's own example is
+		// "dvbv5-zap -c dvb_channel.conf 573000000 -m". Passing the name
+		// here gets "ERROR: Can't find channel" and nothing ever tunes.
+		// The value must match the FREQUENCY line buildInitialFile() wrote.
+		$rArgs[] = escapeshellarg((string) (int) $rT['frequency']);
 
 		return implode(' ', $rArgs);
 	}

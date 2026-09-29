@@ -1295,3 +1295,38 @@ DVB-S2 carrier entered as `2/3` + `PSK/8` will refuse to lock unless those
 happen to be exactly right. A DVB-S2 demodulator reads FEC and modulation out
 of the physical layer header, so `AUTO` for both is strictly better for
 scanning: it cannot be wrong, and forcing a value can.
+
+## 2.5.4 — the meter was passing the wrong positional argument
+
+The 2.5.3 meter never tuned anything. Raw output, once it was finally visible:
+
+    reading channels from file '/tmp/.../try.conf'
+    ERROR: Can't find channel
+
+`buildZapCommand()` passed the tuning file's section name, `CHANNEL`. That is
+right for ordinary zapping and wrong for monitor mode. The synopsis is explicit:
+
+    dvbv5-zap [OPTION]... channel-name
+    dvbv5-zap [OPTION]... frequency-name (for monitor or all PIDs mode)
+
+and the manual's monitoring example is `dvbv5-zap -c dvb_channel.conf 573000000
+-m`. In monitor mode the positional is matched against **FREQUENCY**. It now
+passes `(int) $rT['frequency']`, the same value `buildInitialFile()` writes on
+the FREQUENCY line, so the two can never drift apart.
+
+Two things learned from the real card that are worth not rediscovering:
+
+* **There is no `AUTO` for `MODULATION`.** The tool answers `value AUTO is
+  invalid for MODULATION while parsing line 7`. `INNER_FEC = AUTO` is fine and
+  is the right default; modulation has to be one of QPSK, PSK/8, APSK/16,
+  APSK/32. The panel's form never offered a bare AUTO, so only the bench script
+  was affected, but the asymmetry is easy to get wrong again.
+* **`ERROR FE_SET_VOLTAGE: Operation not permitted` is harmless.** `dvb-fe-tool`
+  prints it on exit on TBS cards, including cards that lock perfectly well
+  (tbsdtv/linux_media#401, and a linux-media thread showing it right after a
+  healthy `Lock (0x1f) Signal= -35.77dBm C/N= 11.90dB`). It is not a diagnosis.
+
+`signal-debug.sh` now passes the frequency, uses explicit modulations, labels
+the FE_SET_VOLTAGE line as noise, and finishes with a `dvbv5-scan` cross-check.
+dvbv5-scan needs no channel name at all, so if it locks while every zap fails,
+the fault is in the zap invocation rather than in the dish.

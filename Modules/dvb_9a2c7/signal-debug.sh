@@ -2,21 +2,21 @@
 #
 # DVB signal bench.
 #
-# Reproduces by hand exactly what the panel's signal meter does, prints the raw
-# tool output the panel hides, and then walks a ladder of variations until one
-# of them locks. Run it on the node that physically holds the card.
+# Reproduces by hand what the panel does, prints the raw tool output the panel
+# used to hide, and walks a ladder of variations until something locks. Run it
+# on the node that physically holds the card.
 #
 #   bash signal-debug.sh
 #   FREQ=11970000 POL=HORIZONTAL bash signal-debug.sh
 #
-# Every parameter is an environment variable so nothing has to be edited:
+# Everything is an environment variable so nothing has to be edited:
 #
 #   ADAPTER  tuner number                      (default 0)
 #   FREQ     frequency in kHz for satellite    (default 10970000 = 10970 MHz)
 #   POL      HORIZONTAL | VERTICAL             (default VERTICAL)
 #   SRATE    symbol rate in symbols/second     (default 27900000 = 27900 kS/s)
 #   DELSYS   DVBS2 | DVBS                      (default DVBS2)
-#   LNB      LNBf name, see -l below           (default UNIVERSAL)
+#   LNB      LNBf name, 'dvbv5-zap -l help'    (default UNIVERSAL)
 #   DISEQC   0-based satellite number, or off  (default off)
 #   SECS     seconds to watch per attempt      (default 5)
 
@@ -68,8 +68,8 @@ if command -v fuser >/dev/null 2>&1; then
 	if fuser -v "$FE" 2>&1 | grep -q .; then
 		printf '  BUSY - something already holds the frontend:\n'
 		fuser -v "$FE" 2>&1 | sed 's/^/    /'
-		printf '\n  A busy frontend is why a meter reads nothing. Stop that process\n'
-		printf '  (a running stream, or a stray dvbv5-zap) and run this again.\n'
+		printf '\n  Stop it (a running stream, the panel meter, or a stray\n'
+		printf '  dvbv5-zap) and run this again.\n'
 	else
 		printf '  free\n'
 	fi
@@ -78,20 +78,26 @@ else
 fi
 
 head2 "4. What the frontend says it is"
+printf '  NOTE: "ERROR FE_SET_VOLTAGE: Operation not permitted" below is\n'
+printf '  harmless noise that dvb-fe-tool prints on TBS cards as it exits.\n'
+printf '  It shows up on cards that lock perfectly well. Ignore it.\n\n'
 dvb-fe-tool -a "$ADAPTER" 2>&1 | sed 's/^/  /'
 
 # ------------------------------------------------------------------ the ladder
 #
-# Each attempt writes a tuning file and runs the same dvbv5-zap invocation the
-# panel uses. The only thing that changes is the parameter under suspicion.
+# In monitor mode dvbv5-zap matches the positional argument against the
+# FREQUENCY, not against the section name:
+#
+#   dvbv5-zap [OPTION]... frequency-name (for monitor or all PIDs mode)
+#   $ dvbv5-zap -c dvb_channel.conf 573000000 -m
+#
+# Passing a name here returns "ERROR: Can't find channel" and nothing tunes.
 
 attempt_no=0
+LOCKED=0
 
-try() {
-	label=$1 delsys=$2 pol=$3 fec=$4 mod=$5 lnbf=$6 diseqc=$7
-	attempt_no=$((attempt_no + 1))
-
-	conf="$WORK/try.conf"
+write_conf() {
+	delsys=$1 pol=$2 fec=$3 mod=$4
 	{
 		printf '[CHANNEL]\n'
 		printf '\tDELIVERY_SYSTEM = %s\n' "$delsys"
@@ -100,15 +106,25 @@ try() {
 		printf '\tSYMBOL_RATE = %s\n' "$SRATE"
 		printf '\tINNER_FEC = %s\n' "$fec"
 		if [ "$delsys" = "DVBS2" ]; then
+			# There is no AUTO for MODULATION: the tool rejects it with
+			# "value AUTO is invalid for MODULATION". FEC does accept AUTO.
 			printf '\tMODULATION = %s\n' "$mod"
 			printf '\tROLLOFF = AUTO\n'
 			printf '\tPILOT = AUTO\n'
 		fi
-	} > "$conf"
+	} > "$WORK/try.conf"
+}
 
-	set -- dvbv5-zap -c "$conf" -a "$ADAPTER" -f 0 -m -t "$SECS" -l "$lnbf"
+try() {
+	label=$1 delsys=$2 pol=$3 fec=$4 mod=$5 lnbf=$6 diseqc=$7
+	attempt_no=$((attempt_no + 1))
+	[ "$LOCKED" = "1" ] && return 0
+
+	write_conf "$delsys" "$pol" "$fec" "$mod"
+
+	set -- dvbv5-zap -c "$WORK/try.conf" -a "$ADAPTER" -f 0 -m -t "$SECS" -l "$lnbf"
 	[ -n "$diseqc" ] && set -- "$@" -S "$diseqc"
-	set -- "$@" CHANNEL
+	set -- "$@" "$FREQ"
 
 	printf '\n[%d] %s\n' "$attempt_no" "$label"
 	printf '    %s\n' "$*"
@@ -116,7 +132,6 @@ try() {
 	out="$WORK/try.log"
 	timeout -k 1 $((SECS + 4)) "$@" > "$out" 2>&1
 
-	# dvbv5-zap prints one status line per second; the last one is the verdict.
 	if grep -qiE '(^|[^n])Lock' "$out"; then
 		printf '    >>> LOCK <<<\n'
 		grep -iE 'Lock' "$out" | tail -2 | sed 's/^/    /'
@@ -136,40 +151,57 @@ try() {
 	return 1
 }
 
-head2 "5. Attempt A - exactly what the panel sent"
-LOCKED=0
+OTHERPOL=$([ "$POL" = "VERTICAL" ] && echo HORIZONTAL || echo VERTICAL)
+
+head2 "5. Attempt A - exactly what the panel sends"
 try "panel settings as stored" "$DELSYS" "$POL" "2/3" "PSK/8" "$LNB" "$DISEQC"
 
-if [ "$LOCKED" = "0" ]; then
-	head2 "6. Attempt B onwards - one variable at a time"
+head2 "6. Attempt B onwards - one variable at a time"
+try "FEC AUTO, modulation PSK/8"   "$DELSYS" "$POL"      "AUTO" "PSK/8" "$LNB" "$DISEQC"
+try "FEC AUTO, modulation QPSK"    "$DELSYS" "$POL"      "AUTO" "QPSK"  "$LNB" "$DISEQC"
+try "the other polarization"       "$DELSYS" "$OTHERPOL" "AUTO" "QPSK"  "$LNB" "$DISEQC"
+try "plain DVB-S instead of S2"    "DVBS"    "$POL"      "AUTO" "QPSK"  "$LNB" "$DISEQC"
+try "DiSEqC port 1 (0-based 0)"    "$DELSYS" "$POL"      "AUTO" "QPSK"  "$LNB" "0"
+try "DiSEqC port 2 (0-based 1)"    "$DELSYS" "$POL"      "AUTO" "QPSK"  "$LNB" "1"
 
-	# A DVB-S2 demodulator reads FEC and modulation out of the physical layer
-	# header. Forcing the wrong pair blocks a lock on a perfectly good carrier,
-	# so this is the single most likely fix.
-	try "same, but FEC and modulation AUTO" "$DELSYS" "$POL" "AUTO" "AUTO" "$LNB" "$DISEQC" ||
-	try "the other polarization" "$DELSYS" \
-		"$([ "$POL" = "VERTICAL" ] && echo HORIZONTAL || echo VERTICAL)" \
-		"AUTO" "AUTO" "$LNB" "$DISEQC" ||
-	try "plain DVB-S instead of DVB-S2" "DVBS" "$POL" "AUTO" "QPSK" "$LNB" "$DISEQC" ||
-	try "DiSEqC port 1 (0-based 0)" "$DELSYS" "$POL" "AUTO" "AUTO" "$LNB" "0" ||
-	try "DiSEqC port 2 (0-based 1)" "$DELSYS" "$POL" "AUTO" "AUTO" "$LNB" "1" ||
-	try "no DiSEqC at all" "$DELSYS" "$POL" "AUTO" "AUTO" "$LNB" ""
+# ------------------------------------------------------------------- the scan
+#
+# dvbv5-scan is what the panel's scan path actually runs, and it takes the
+# tuning file with no channel name at all. If this locks while every zap above
+# failed, the problem is the zap invocation, not the dish.
+
+head2 "7. Cross-check with dvbv5-scan (no channel name involved)"
+if command -v dvbv5-scan >/dev/null 2>&1; then
+	write_conf "$DELSYS" "$POL" "AUTO" "QPSK"
+	set -- dvbv5-scan -a "$ADAPTER" -f 0 -l "$LNB"
+	[ -n "$DISEQC" ] && set -- "$@" -S "$DISEQC"
+	set -- "$@" -o "$WORK/found.conf" "$WORK/try.conf"
+	printf '  %s\n\n' "$*"
+	timeout -k 1 90 "$@" 2>&1 | sed 's/^/  /' | head -40
+	if [ -s "$WORK/found.conf" ]; then
+		printf '\n  Services found: %s\n' "$(grep -c '^\[' "$WORK/found.conf")"
+		grep '^\[' "$WORK/found.conf" | head -20 | sed 's/^/    /'
+		LOCKED=1
+	else
+		printf '\n  No services written.\n'
+	fi
+else
+	printf '  dvbv5-scan not installed.\n'
 fi
 
 rule
 if [ "$LOCKED" = "1" ]; then
-	printf 'RESULT: a lock was achieved. Copy the winning values into the panel.\n'
+	printf 'RESULT: something locked. Copy the winning values into the panel.\n'
 else
 	printf 'RESULT: nothing locked.\n\n'
-	printf 'Read attempt A above:\n'
-	printf '  - a level was reported but never a lock -> the dish and LNB are\n'
-	printf '    alive; frequency, symbol rate or LNB band is wrong.\n'
-	printf '  - every attempt printed nothing at all   -> no LNB power, wrong\n'
-	printf '    LNB type, dead cable, or the frontend is held by another process.\n\n'
-	printf 'Useful next checks:\n'
-	printf '  dvbv5-zap -l help           list the LNBf names this build accepts\n'
+	printf 'If a level was reported but never a lock, the dish and LNB are alive\n'
+	printf 'and the frequency, symbol rate or LNB band is wrong. If every attempt\n'
+	printf 'showed no level at all, suspect LNB power, cabling, the DiSEqC port,\n'
+	printf 'or dish alignment.\n\n'
+	printf 'Next checks:\n'
+	printf '  dvbv5-zap -l help      list the LNBf names this build accepts\n'
 	printf '  FREQ=<other> bash %s\n' "$(basename "$0")"
-	printf '  A C-band LNB needs LNB=C-BAND and a frequency near 3700000 kHz,\n'
-	printf '  not 10970000. Confirm which band the dish actually feeds.\n'
+	printf '  UNIVERSAL covers 10800-11800 (LO 9750) and 11600-12700 (LO 10600).\n'
+	printf '  A C-band dish needs LNB=C-BAND and a frequency near 3700000 kHz.\n'
 fi
 rule
