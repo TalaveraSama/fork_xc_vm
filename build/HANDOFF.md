@@ -1221,3 +1221,52 @@ releases" line naming a file in `/home/xc_vm/tmp/`. Manual workaround on an
 older build:
 
     rm -f /home/xc_vm/tmp/gitapi_<owner>_<repo>_<channel>
+
+## 2.5.2 — a live signal meter, because "tuner never locked" says nothing
+
+`Scanned OK 0 / Services found 0` with `SIGNAL —` gives an operator no way to
+tell a mis-aimed dish from mistyped tuning parameters. Both fail identically.
+
+Added a per-transponder meter (blue aerial button on the DVB page). It runs
+`dvbv5-zap -c <conf> -a N -f N -m -t 3 [-l <lnb>] [-S diseqc-1] 'CHANNEL'`
+and reports strength, C/N, postBER and UCB, refreshing every 1.5 s.
+
+Read it like this:
+
+* strength high, no lock  -> the dish is fine; symbol rate, FEC, modulation or
+  polarization is wrong.
+* strength near zero      -> LNB power, cabling, DiSEqC port or dish alignment.
+
+Four things that are deliberate and must not be "simplified" away:
+
+1. **It runs inline, not through `dvb_jobs`.** `cron:dvb` ticks once a minute.
+   A meter that updates once a minute cannot be used to aim an antenna, which
+   is the only reason it exists.
+2. **The zap is wrapped in `timeout -k 1 5`.** `dvbv5-zap -m` never exits on
+   its own. Without the timeout it would hold the frontend open forever and
+   every later scan on that adapter would fail with "device busy".
+3. **It refuses when the transponder is streaming.** `DvbAdapterService::pick()`
+   returns the adapter a transponder already holds (`in_use_by = <its own id>`),
+   so measuring a live transponder would fight dvblast for the same frontend.
+4. **It refuses when `server_id` is not this node.** The card is physical. A
+   queued job would answer a minute later to a caller polling every 1.5 s.
+
+`parseSignal()` was also wrong in a way that would have made the meter lie:
+
+* `C/N= -13.80dB` was read by `([0-9.]+)` as **+13.80** — a dead carrier scored
+  as healthy. All numbers now match `-?[0-9.]+`.
+* `Signal=` comes back as a percentage on some drivers and as **dBm** on
+  others. `-33.40dBm` was being read as `33%`. The unit is now matched
+  explicitly and dBm is mapped with `(dBm + 75) * 2`, clamped to 0..100.
+* Lock was `stripos($log, 'Lock') !== false`, which is also true for
+  `unlocked`. Now `/(?<!un)\bLock/i` — note there is no trailing `\b`, or
+  `LOCKED` would stop matching.
+
+When nothing at all can be read, the meter returns `explainFailure()` rather
+than a confident `0%`; a zero that means "no data" and a zero that means "no
+signal" are different answers.
+
+Readings land in `signal_strength` / `signal_quality` through the new
+`DvbTransponderService::recordSignal()`, which touches **only** those two
+columns. `recordScan()` would also reset `scan_status` and `scan_message`, i.e.
+erase the failure you are in the middle of diagnosing.

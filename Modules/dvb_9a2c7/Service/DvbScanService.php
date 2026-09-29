@@ -51,6 +51,9 @@ class DvbScanService {
 	 * @param array $rAdapter     Row from `dvb_adapters` to tune with.
 	 * @return array{status:bool,error:string,services:array,signal:array,log:string}
 	 */
+	/** Seconds to hold the frontend open while sampling the demodulator. */
+	private const SIGNAL_SECONDS = 3;
+
 	public static function scan(array $rTransponder, array $rAdapter): array {
 		$rFail = function ($rError, $rLog = '') {
 			return ['status' => false, 'error' => $rError, 'services' => [], 'signal' => [], 'log' => $rLog];
@@ -108,6 +111,112 @@ class DvbScanService {
 			'signal'   => self::parseSignal($rLog),
 			'log'      => $rLog,
 		];
+	}
+
+	/**
+	 * Take a live signal reading without scanning.
+	 *
+	 * dvbv5-scan only reports signal as a side effect of a successful scan, so
+	 * when a transponder will not lock there is nothing to look at -- which is
+	 * exactly the moment an operator needs a number. This tunes the carrier and
+	 * reads the demodulator, then gets out of the way.
+	 *
+	 * Deliberately synchronous: a meter that answers once a minute through the
+	 * job queue is useless for pointing a dish. The caller is responsible for
+	 * only invoking this on the node that holds the card.
+	 *
+	 * @param array $rTransponder Row from `dvb_transponders`.
+	 * @param array $rAdapter     Row from `dvb_adapters`.
+	 * @return array{status:bool,error:string,signal:array,log:string}
+	 */
+	public static function measureSignal(array $rTransponder, array $rAdapter): array {
+		$rFail = function ($rError, $rLog = '') {
+			return ['status' => false, 'error' => $rError, 'signal' => [], 'log' => $rLog];
+		};
+
+		$rZap = self::locateBinary('dvbv5-zap');
+
+		if ($rZap === null) {
+			return $rFail('dvbv5-zap not found on this node. Install dvb-tools (apt-get install dvb-tools).');
+		}
+
+		$rWorkDir = self::workDir();
+
+		if ($rWorkDir === null) {
+			return $rFail('Unable to create the DVB scratch directory.');
+		}
+
+		$rStamp   = (int) $rTransponder['id'] . '_' . getmypid();
+		$rInPath  = $rWorkDir . 'signal_' . $rStamp . '.conf';
+		$rLogPath = $rWorkDir . 'signal_' . $rStamp . '.log';
+
+		if (file_put_contents($rInPath, self::buildInitialFile($rTransponder)) === false) {
+			return $rFail('Unable to write the tuning file to ' . $rInPath . '.');
+		}
+
+		$rCommand = self::buildZapCommand($rZap, $rTransponder, $rAdapter, $rInPath);
+
+		// Hard-kill one second after the monitor window: dvbv5-zap holds the
+		// frontend open, and a stray process would keep the tuner busy for
+		// every later scan on this adapter.
+		@shell_exec(
+			'timeout -k 1 ' . (self::SIGNAL_SECONDS + 2) . ' ' . $rCommand
+			. ' > ' . escapeshellarg($rLogPath) . ' 2>&1'
+		);
+
+		$rLog = is_file($rLogPath) ? (string) file_get_contents($rLogPath) : '';
+
+		@unlink($rInPath);
+		@unlink($rLogPath);
+
+		$rSignal = self::parseSignal($rLog);
+
+		if (!$rSignal['locked'] && $rSignal['strength'] === null && $rSignal['quality'] === null) {
+			// Nothing at all came back: that is a tool or permission problem,
+			// not a weak signal, and saying "0%" would be a lie.
+			return $rFail(self::explainFailure($rLog), $rLog);
+		}
+
+		return ['status' => true, 'error' => '', 'signal' => $rSignal, 'log' => $rLog];
+	}
+
+	/**
+	 * Assemble the dvbv5-zap command line for a signal reading.
+	 *
+	 * Monitor mode (-m) takes the section name of the tuning file rather than a
+	 * service name, which is why buildInitialFile() writes a fixed [CHANNEL]
+	 * header. -t bounds the run so the frontend is released promptly.
+	 *
+	 * @param string $rZap Absolute path to dvbv5-zap.
+	 * @param array  $rT   Transponder row.
+	 * @param array  $rA   Adapter row.
+	 * @param string $rIn  Tuning file.
+	 * @return string
+	 */
+	private static function buildZapCommand($rZap, array $rT, array $rA, $rIn) {
+		$rArgs = [
+			escapeshellarg($rZap),
+			'-c ' . escapeshellarg($rIn),
+			'-a ' . (int) ($rA['adapter_num'] ?? 0),
+			'-f ' . (int) ($rA['frontend_num'] ?? 0),
+			'-m',
+			'-t ' . self::SIGNAL_SECONDS,
+		];
+
+		if (in_array(strtoupper((string) ($rT['delivery_system'] ?? '')), self::SATELLITE, true)) {
+			$rArgs[] = '-l ' . escapeshellarg(self::lnbName((string) ($rT['lnb_type'] ?? 'UNIVERSAL')));
+
+			// Same 1-based to 0-based shift as the scan path: dvbv5 counts
+			// satellites from 0, the panel stores the port the way an operator
+			// says it.
+			if ((int) ($rT['diseqc'] ?? 0) > 0) {
+				$rArgs[] = '-S ' . ((int) $rT['diseqc'] - 1);
+			}
+		}
+
+		$rArgs[] = escapeshellarg('CHANNEL');
+
+		return implode(' ', $rArgs);
 	}
 
 	/**
@@ -326,21 +435,59 @@ class DvbScanService {
 		$rStrength = null;
 		$rQuality  = null;
 
-		if (preg_match_all('/Signal\s*=\s*([0-9.]+)\s*%/i', $rLog, $rMatches) > 0) {
-			$rStrength = (int) round((float) end($rMatches[1]));
+		$rStrengthDbm = null;
+		$rCnrDb       = null;
+
+		// Drivers report signal either as a percentage or as an absolute power
+		// in dBm, and the dBm figure is negative. Match the unit explicitly so
+		// "-33.40dBm" is never mistaken for 33% -- and note the leading -? on
+		// every number here: without it a negative reading parses as its own
+		// absolute value, which reads as a healthy signal.
+		if (preg_match_all('/Signal\s*=\s*(-?[0-9.]+)\s*%/i', $rLog, $rMatches) > 0) {
+			$rStrength = (int) max(0, min(100, round((float) end($rMatches[1]))));
+		} elseif (preg_match_all('/Signal\s*=\s*(-?[0-9.]+)\s*dBm/i', $rLog, $rMatches) > 0) {
+			$rStrengthDbm = (float) end($rMatches[1]);
+
+			// Map dBm onto the same 0..100 bar. A Ku tuner sees roughly -75 dBm
+			// at the noise floor and -25 dBm on a strong carrier, so that span
+			// is stretched over the bar rather than inventing a percentage.
+			$rStrength = (int) max(0, min(100, round(($rStrengthDbm + 75) * 2)));
 		}
 
 		// C/N is a dB figure, not a percentage. Clamping it to 0..100 keeps one
 		// column usable for both without pretending the units are the same;
-		// anything above 20 dB is excellent on satellite anyway.
-		if (preg_match_all('/C\/N\s*=\s*([0-9.]+)\s*dB/i', $rLog, $rMatches) > 0) {
-			$rQuality = (int) min(100, round((float) end($rMatches[1]) * 5));
+		// anything above 20 dB is excellent on satellite anyway. It can be
+		// negative when the demodulator is not locked.
+		if (preg_match_all('/C\/N\s*=\s*(-?[0-9.]+)\s*dB/i', $rLog, $rMatches) > 0) {
+			$rCnrDb   = (float) end($rMatches[1]);
+			$rQuality = (int) max(0, min(100, round($rCnrDb * 5)));
+		}
+
+		// "Lock" also appears inside the word "Unlock"/"unlocked", and dvbv5
+		// prints the status flags as (0x1f) when locked. Require the flag word
+		// at a boundary and not preceded by "un".
+		$rLocked = preg_match('/(?<!un)\bLock/i', $rLog) === 1;
+
+		$rBer = null;
+
+		if (preg_match_all('/postBER\s*=\s*([0-9.]+(?:x10\^-?[0-9]+)?)/i', $rLog, $rMatches) > 0) {
+			$rBer = (string) end($rMatches[1]);
+		}
+
+		$rUcb = null;
+
+		if (preg_match_all('/UCB\s*=\s*([0-9]+)/i', $rLog, $rMatches) > 0) {
+			$rUcb = (int) end($rMatches[1]);
 		}
 
 		return [
-			'strength' => $rStrength,
-			'quality'  => $rQuality,
-			'locked'   => stripos($rLog, 'Lock') !== false,
+			'strength'     => $rStrength,
+			'quality'      => $rQuality,
+			'locked'       => $rLocked,
+			'strength_dbm' => $rStrengthDbm,
+			'cnr_db'       => $rCnrDb,
+			'ber'          => $rBer,
+			'ucb'          => $rUcb,
 		];
 	}
 

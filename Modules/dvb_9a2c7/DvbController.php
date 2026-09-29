@@ -232,6 +232,77 @@ class DvbController {
 	 *
 	 * @return void
 	 */
+	/**
+	 * Live signal reading for one transponder.
+	 *
+	 * Runs inline rather than through the job queue. cron:dvb ticks once a
+	 * minute, and a meter that refreshes once a minute cannot be used to point
+	 * a dish, which is the only reason this exists.
+	 *
+	 * @return void
+	 */
+	public function apiSignal() {
+		$rID          = (int) $this->input('id', 0);
+		$rTransponder = DvbTransponderService::find($rID);
+
+		if ($rTransponder === null) {
+			$this->json(['result' => false, 'error' => 'Transponder not found.']);
+		}
+
+		$rHere = defined('SERVER_ID') ? (int) SERVER_ID : 1;
+
+		if ((int) $rTransponder['server_id'] !== $rHere) {
+			// Refuse rather than queue. A job would answer in a minute and the
+			// caller is a meter polling every two seconds; pretending to
+			// support it would just look broken.
+			$this->json([
+				'result' => false,
+				'error'  => 'The signal meter only runs on the node holding the card. Open the panel on that server, or run: dvbv5-zap -c <file> -m on it directly.',
+			]);
+		}
+
+		if (!empty($rTransponder['streaming'])) {
+			// pick() hands back the adapter this transponder already holds, so
+			// measuring a live transponder would fight dvblast for the same
+			// frontend. Refuse instead of disturbing channels that are on air.
+			$this->json([
+				'result' => false,
+				'error'  => 'This transponder is streaming. Stop it before measuring, otherwise the meter and the running stream fight over the same tuner.',
+			]);
+		}
+
+		$rAdapter = DvbAdapterService::pick($rTransponder);
+
+		if ($rAdapter === null) {
+			$this->json([
+				'result' => false,
+				'error'  => 'No free tuner on this server. Every adapter is either disabled or already claimed by a running transponder.',
+			]);
+		}
+
+		$rResult = DvbScanService::measureSignal($rTransponder, $rAdapter);
+
+		if (!$rResult['status']) {
+			$this->json(['result' => false, 'error' => $rResult['error']]);
+		}
+
+		$rSignal = $rResult['signal'];
+
+		DvbTransponderService::recordSignal($rID, $rSignal);
+
+		$this->json([
+			'result'   => true,
+			'locked'   => (bool) $rSignal['locked'],
+			'strength' => $rSignal['strength'],
+			'quality'  => $rSignal['quality'],
+			'dbm'      => $rSignal['strength_dbm'],
+			'cnr'      => $rSignal['cnr_db'],
+			'ber'      => $rSignal['ber'],
+			'ucb'      => $rSignal['ucb'],
+			'adapter'  => '/dev/dvb/adapter' . (int) $rAdapter['adapter_num'] . '/frontend' . (int) $rAdapter['frontend_num'],
+		]);
+	}
+
 	public function apiScan() {
 		$rID          = (int) $this->input('id', 0);
 		$rTransponder = DvbTransponderService::find($rID);

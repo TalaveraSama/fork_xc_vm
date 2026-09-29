@@ -203,6 +203,9 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 												<button type="button" class="btn btn-sm btn-primary" title="Scan now" onclick="dvbScan(<?php echo $rID; ?>);">
 													<i class="mdi mdi-radar"></i>
 												</button>
+												<button type="button" class="btn btn-sm btn-info" title="Live signal meter" onclick="dvbSignal(<?php echo $rID; ?>, '<?php echo htmlspecialchars((string) $rRow['name'], ENT_QUOTES); ?>');">
+													<i class="mdi mdi-signal-variant"></i>
+												</button>
 												<?php if ((int) $rRow['service_count'] > 0): ?>
 													<?php if (!empty($rRow['streaming'])): ?>
 														<button type="button" class="btn btn-sm btn-warning" title="Stop streaming" onclick="dvbStream(<?php echo $rID; ?>, 'stop');">
@@ -226,6 +229,26 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 								</tbody>
 							</table>
 						</div>
+						<div id="dvb-meter" class="card border mt-3" style="display:none;">
+							<div class="card-body">
+								<div class="d-flex justify-content-between align-items-center mb-2">
+									<h5 class="mb-0">Signal &mdash; <span id="dvb-meter-name"></span></h5>
+									<div>
+										<span id="dvb-meter-lock" class="badge badge-secondary mr-2">waiting</span>
+										<button type="button" class="btn btn-sm btn-secondary" onclick="dvbSignalStop();">Close</button>
+									</div>
+								</div>
+								<div class="mb-1"><small class="text-muted">Signal strength <span id="dvb-meter-slabel"></span></small></div>
+								<div class="progress mb-3" style="height:18px;">
+									<div id="dvb-meter-sbar" class="progress-bar" role="progressbar" style="width:0%;">0%</div>
+								</div>
+								<div class="mb-1"><small class="text-muted">Quality (C/N) <span id="dvb-meter-qlabel"></span></small></div>
+								<div class="progress mb-3" style="height:18px;">
+									<div id="dvb-meter-qbar" class="progress-bar" role="progressbar" style="width:0%;">0%</div>
+								</div>
+								<small class="text-muted" id="dvb-meter-detail"></small>
+							</div>
+						</div>
 					</div>
 				</div>
 			</div>
@@ -245,6 +268,89 @@ renderUnifiedLayoutFooter('admin');
 			return;
 		}
 		$.toast({ text: rMessage, icon: rIcon || 'info', position: 'top-right' });
+	}
+
+	// ---- live signal meter -------------------------------------------------
+	// Polled rather than streamed: each sample tunes the frontend for a few
+	// seconds and releases it, so the tuner is never held open by an idle
+	// browser tab. dvbSignalStop() clears the timer, and the reply handler
+	// checks the generation counter so a late response from a previous
+	// transponder cannot repaint the bars after you switched.
+	var dvbMeterTimer = null;
+	var dvbMeterGen = 0;
+
+	function dvbSignalStop() {
+		dvbMeterGen++;
+		if (dvbMeterTimer) {
+			clearTimeout(dvbMeterTimer);
+			dvbMeterTimer = null;
+		}
+		$('#dvb-meter').hide();
+	}
+
+	function dvbMeterBar(rSel, rValue, rLabel) {
+		var rPct = (rValue === null || rValue === undefined) ? 0 : Math.max(0, Math.min(100, rValue));
+		var rClass = 'progress-bar ' + (rPct >= 60 ? 'bg-success' : (rPct >= 30 ? 'bg-warning' : 'bg-danger'));
+		$(rSel).attr('class', rClass).css('width', rPct + '%').text(rPct + '%');
+		return rLabel;
+	}
+
+	function dvbSignalPoll(rID) {
+		var rGen = dvbMeterGen;
+
+		$.post('./api?action=dvb_signal', { id: rID }, function(rData) {
+			if (rGen !== dvbMeterGen) {
+				return;
+			}
+
+			if (!rData.result) {
+				$('#dvb-meter-lock').attr('class', 'badge badge-danger mr-2').text('error');
+				$('#dvb-meter-detail').text(rData.error || 'Unknown error.');
+				return;
+			}
+
+			$('#dvb-meter-lock')
+				.attr('class', 'badge mr-2 ' + (rData.locked ? 'badge-success' : 'badge-danger'))
+				.text(rData.locked ? 'LOCKED' : 'no lock');
+
+			dvbMeterBar('#dvb-meter-sbar', rData.strength);
+			dvbMeterBar('#dvb-meter-qbar', rData.quality);
+
+			$('#dvb-meter-slabel').text(rData.dbm !== null && rData.dbm !== undefined ? '(' + rData.dbm + ' dBm)' : '');
+			$('#dvb-meter-qlabel').text(rData.cnr !== null && rData.cnr !== undefined ? '(' + rData.cnr + ' dB)' : '');
+
+			var rBits = [rData.adapter];
+			if (rData.ber !== null && rData.ber !== undefined) { rBits.push('postBER ' + rData.ber); }
+			if (rData.ucb !== null && rData.ucb !== undefined) { rBits.push('UCB ' + rData.ucb); }
+			if (!rData.locked && rData.strength >= 40) {
+				rBits.push('carrier present but no lock \u2014 suspect symbol rate, FEC, modulation or polarization rather than the dish');
+			}
+			if (!rData.locked && rData.strength < 40) {
+				rBits.push('almost no carrier \u2014 suspect LNB power, cabling, DiSEqC port or dish alignment');
+			}
+			$('#dvb-meter-detail').text(rBits.join(' \u00b7 '));
+
+			dvbMeterTimer = setTimeout(function() { dvbSignalPoll(rID); }, 1500);
+		}, 'json').fail(function(rXHR) {
+			if (rGen !== dvbMeterGen) {
+				return;
+			}
+			$('#dvb-meter-lock').attr('class', 'badge badge-danger mr-2').text('error');
+			$('#dvb-meter-detail').text('Request failed (' + rXHR.status + ').');
+		});
+	}
+
+	function dvbSignal(rID, rName) {
+		dvbSignalStop();
+		$('#dvb-meter-name').text(rName || ('#' + rID));
+		$('#dvb-meter-lock').attr('class', 'badge badge-secondary mr-2').text('measuring...');
+		$('#dvb-meter-detail').text('Tuning the carrier, this takes a few seconds.');
+		$('#dvb-meter-slabel').text('');
+		$('#dvb-meter-qlabel').text('');
+		dvbMeterBar('#dvb-meter-sbar', 0);
+		dvbMeterBar('#dvb-meter-qbar', 0);
+		$('#dvb-meter').show();
+		dvbSignalPoll(rID);
 	}
 
 	function dvbDiscover() {

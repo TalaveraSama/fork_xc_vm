@@ -284,6 +284,27 @@ class DvbTransponderService {
 	 * @param array  $rSignal  Result of DvbScanService::parseSignal().
 	 * @return void
 	 */
+	/**
+	 * Store a live meter reading.
+	 *
+	 * Deliberately narrower than recordScan(): the meter must not overwrite
+	 * scan_status, scan_message or last_scan, or pointing a dish would erase
+	 * the reason the last scan failed, which is exactly what you are trying
+	 * to fix at that moment.
+	 *
+	 * @param int   $rID     Transponder id.
+	 * @param array $rSignal Result of DvbScanService::parseSignal().
+	 * @return void
+	 */
+	public static function recordSignal($rID, array $rSignal) {
+		self::db()->query(
+			'UPDATE `dvb_transponders` SET `signal_strength` = ?, `signal_quality` = ? WHERE `id` = ?;',
+			isset($rSignal['strength']) ? $rSignal['strength'] : null,
+			isset($rSignal['quality']) ? $rSignal['quality'] : null,
+			(int) $rID
+		);
+	}
+
 	public static function recordScan($rID, $rStatus, $rMessage, array $rSignal = []) {
 		self::db()->query(
 			'UPDATE `dvb_transponders`
