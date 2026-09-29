@@ -626,6 +626,69 @@ like "already up to date".
 an unrecognised sub-command reports itself on stderr and returns 1 instead
 of falling off the end of the switch into `return 0`.
 
+### Watch Folder never scanned, because nothing ever scheduled it
+
+Reported from the live panel: the Watch Folder feature does not work.
+
+`WatchModule` defines thirteen public methods. `getCronEntries()` is not
+one of them, so it inherited `BaseModule`'s default, which returns an empty
+array. `ModuleLoader::collectCronEntries()` skips it, and `StartupCommand`
+and `StatusCommand` write a crontab with no watch line in it. The folders
+sat there and were never scanned.
+
+What hid it is that `registerCommands()` **is** implemented, so `cron:watch`
+existed and ran correctly by hand -- the module looked installed and
+healthy from every angle except the one that mattered. The control that
+settles it is the Flussonic module, which works and does declare
+`getCronEntries(): ['*/5 * * * *' => 'cron:flussonic']`.
+
+Fixed with `['* * * * *' => 'cron:watch']`, which is the interval
+`CronProviderInterface` documents for this exact job in its own docblock.
+Every minute is safe: `WatchCronJob` takes a PID lock in
+`CACHE_TMP_PATH/watch_pid` and exits at once when a previous scan is still
+running, and `watch_folders` has no per-folder interval column, so the
+crontab line is the only schedule that exists.
+
+A second, latent fault went with it. `WatchService.php` imported
+`XcVm\Module\Tmdb\TmdbApiService`, which does not exist; the correct class
+is `XcVm\Infrastructure\Tmdb\TmdbApiService`, and `WatchItemCommand.php`
+in the same module imports exactly that. `WatchService::updateCategories()`
+calls it and would fatal with a class-not-found -- but nothing calls
+`updateCategories()` anywhere in the tree, so it never fired. Corrected
+rather than left as a tripwire.
+
+#### This module is written for a core this fork does not have
+
+`module.json` declares `requires_core >= 2.5.0`; the fork is built on
+upstream 2.3.9. Nothing enforces that field -- it is only displayed on the
+Modules page -- but it is accurate, and it shows. Six classes the module
+imports do not exist here: `TopbarRegistry`, `TableRegistry`,
+`PermissionRegistry`, `QuickToolsRegistry`, `VodImportedEvent` and the Tmdb
+service above.
+
+Those cost nothing, and it is worth knowing why before someone 'fixes' them.
+PHP resolves a type hint only when the method is called, and core 2.3.9
+never calls `registerTopbar`/`registerTables`/`registerPermissions`/
+`registerQuickTools` -- it has no such registries. It does not need them:
+everything those methods would register is still hard-coded in core, which
+is what 2.5.0 refactored away. `Public/Views/admin/topbar.php` carries the
+watch buttons, `TableController.php:171` has `case "watch_output"`, the
+`folder_watch*` permissions are in core, and `clear_watch_logs` is in
+`post.php` and `quick_tools.php`. Likewise `onVodImported` never fires
+because nothing dispatches `VodImportedEvent`, and nothing needs to:
+`MovieService.php:426` updates `watch_logs` directly. The four methods and
+the listener are dead code on this core, not breakage.
+
+**The module is not in `.github/patched-upstream-files.txt` on purpose.**
+That list is compared against the upstream XC_VM tree with an `src/`
+prefix, and this module does not live there -- it ships from
+`Vateron-Media/Module_Watchfolder` and carries its own `update` block
+pointing at it. Listing it would only produce false positives. The real
+exposure is different and worth remembering: pressing **Update** on Watch
+Folder in the Modules page pulls from that repository and reverts this fix,
+reinstalling a module built for a 2.5.0 core. The weekly `module_updates`
+cron is safe -- it only checks availability and never downloads or applies.
+
 ## Faults found in the fork's own CI
 
 Same rule: do not revert these. Every one was verified, not reasoned about.
