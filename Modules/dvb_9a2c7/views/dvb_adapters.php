@@ -87,6 +87,10 @@ dmesg | grep -i frontend</pre>
 		</div>
 	</div>
 </div>
+<?php
+require_once MAIN_HOME . 'Public/Views/layouts/footer.php';
+renderUnifiedLayoutFooter('admin');
+?>
 </body>
 
 </html>

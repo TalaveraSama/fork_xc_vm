@@ -204,6 +204,10 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 		</form>
 	</div>
 </div>
+<?php
+require_once MAIN_HOME . 'Public/Views/layouts/footer.php';
+renderUnifiedLayoutFooter('admin');
+?>
 </body>
 
 </html>

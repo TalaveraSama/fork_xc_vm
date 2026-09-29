@@ -212,13 +212,18 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 	</div>
 </div>
 
-<script>
-	function dvbNotify(rMessage) {
-		if (typeof toastr !== 'undefined') {
-			toastr.info(rMessage);
-		} else {
-			alert(rMessage);
+<?php
+require_once MAIN_HOME . 'Public/Views/layouts/footer.php';
+renderUnifiedLayoutFooter('admin');
+?>
+<script id="scripts">
+	// $.toast() is the panel's notifier (jquery-toast, loaded by the admin
+	// footer). toastr is a different library and is not shipped here at all.
+	function dvbNotify(rMessage, rIcon) {
+		if (!rMessage) {
+			return;
 		}
+		$.toast({ text: rMessage, icon: rIcon || 'info', position: 'top-right' });
 	}
 
 	function dvbCheckAll(rBox) {
@@ -256,7 +261,9 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 			setTimeout(function() {
 				location.reload();
 			}, 1500);
-		}, 'json');
+		}, 'json').fail(function(rXHR) {
+			dvbNotify('Request failed (' + rXHR.status + '). Check the browser console and the panel log.', 'error');
+		});
 	}
 
 	$(function() {
@@ -272,7 +279,9 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 				// The state badge is written by the tuner node, not here, so a
 				// reload is the only honest way to show what actually happened.
 				setTimeout(function() { location.reload(); }, 1200);
-			}, 'json');
+			}, 'json').fail(function(rXHR) {
+				dvbNotify('Request failed (' + rXHR.status + '). Check the browser console and the panel log.', 'error');
+			});
 		});
 	});
 
@@ -286,7 +295,9 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 		}, function(rData) {
 			dvbNotify(rData.note || rData.error);
 			location.reload();
-		}, 'json');
+		}, 'json').fail(function(rXHR) {
+			dvbNotify('Request failed (' + rXHR.status + '). Check the browser console and the panel log.', 'error');
+		});
 	}
 </script>
 </body>

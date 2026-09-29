@@ -1144,3 +1144,49 @@ runs them.
 Grep to keep it fixed:
 
     grep -rn "sudo -u xc_vm.*console.php startup" --include=*.php --include=*.sh .
+
+### 2.5.0 — the DVB views never ran any JavaScript (dvb module 1.2.2)
+
+Reported from the real panel: "Discover adapters" did nothing and the NEWCAMD
+reachability test produced no message at all, neither success nor failure. The
+backend was fine. The views were broken in three separate ways, each enough on
+its own to make every button inert.
+
+**1. No footer, so no jQuery.** Every view ended its markup and went straight
+to `<script>`. `Public/Views/admin/footer.php` is what loads
+`assets/js/vendor.min.js` (jQuery, line 29) and `jquery-toast` (line 30). The
+controller `require_once`s the footer file but does not render it -- calling
+`renderUnifiedLayoutFooter('admin')` is the view's job, exactly as
+`flussonic.php:179` does. Without it `$` is undefined and every handler throws.
+
+**2. `<script>` instead of `<script id="scripts">`.** The panel navigates by
+XHR and swaps the page's script block, `Public/assets/admin/js/common.js:269`:
+
+    $("#scripts").replaceWith($(rData).filter("#scripts"));
+
+`filter()` matches only top-level nodes carrying that id. A plain `<script>`
+never matches, so the incoming page contributes nothing and the outgoing
+page's block is replaced with an empty set. The module's JS is not merely
+skipped, it is deleted. 102 of the 120 core admin views carry the id; the 18
+that do not are infrastructure partials (header, footer, topbar, modals...),
+not pages.
+
+**3. `toastr` does not exist in this panel.** The views called
+`toastr.success/error/info` seven times. The codebase has zero references to
+toastr and 295 to `$.toast()` (jquery-toast). Even with jQuery loaded those
+calls would have thrown.
+
+Fixed in all five views. Also added a `.fail()` handler to all eleven `$.post`
+calls: jQuery does not invoke the success callback on a failed request, so
+without one an HTTP error is indistinguishable from nothing happening --
+precisely the symptom that was reported. `dvb_camd.php` was additionally
+missing its closing `</body></html>`.
+
+Checklist for any future module view:
+
+  * ends with `renderUnifiedLayoutFooter('admin')` before the script block
+  * the script block is `<script id="scripts">`
+  * notifications use `$.toast()`, never `toastr`
+  * every `$.post`/`$.getJSON` chains a `.fail()`
+
+No schema change, so no `migrations/1.2.2.sql`.

@@ -233,13 +233,18 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 	</div>
 </div>
 
-<script>
-	function dvbNotify(rMessage) {
-		if (typeof toastr !== 'undefined') {
-			toastr.info(rMessage);
-		} else {
-			alert(rMessage);
+<?php
+require_once MAIN_HOME . 'Public/Views/layouts/footer.php';
+renderUnifiedLayoutFooter('admin');
+?>
+<script id="scripts">
+	// $.toast() is the panel's notifier (jquery-toast, loaded by the admin
+	// footer). toastr is a different library and is not shipped here at all.
+	function dvbNotify(rMessage, rIcon) {
+		if (!rMessage) {
+			return;
 		}
+		$.toast({ text: rMessage, icon: rIcon || 'info', position: 'top-right' });
 	}
 
 	function dvbDiscover() {
@@ -252,7 +257,9 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 			}
 			dvbNotify(rData.note);
 			dvbPoll(rData.job_id);
-		}, 'json');
+		}, 'json').fail(function(rXHR) {
+			dvbNotify('Request failed (' + rXHR.status + '). Check the browser console and the panel log.', 'error');
+		});
 	}
 
 	function dvbScan(rID) {
@@ -265,7 +272,9 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 			}
 			dvbNotify(rData.note);
 			dvbPoll(rData.job_id);
-		}, 'json');
+		}, 'json').fail(function(rXHR) {
+			dvbNotify('Request failed (' + rXHR.status + '). Check the browser console and the panel log.', 'error');
+		});
 	}
 
 	// The tuner node picks work up on its cron tick, so the first few polls
@@ -292,7 +301,9 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 					return;
 				}
 				dvbPoll(rJobID, rTries);
-			}, 'json');
+			}, 'json').fail(function(rXHR) {
+				dvbNotify('Request failed (' + rXHR.status + '). Check the browser console and the panel log.', 'error');
+			});
 		}, 5000);
 	}
 
@@ -307,7 +318,9 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 			}
 			dvbNotify(rData.note);
 			dvbPoll(rData.job_id);
-		}, 'json');
+		}, 'json').fail(function(rXHR) {
+			dvbNotify('Request failed (' + rXHR.status + '). Check the browser console and the panel log.', 'error');
+		});
 	}
 
 	function dvbPreview(rID) {
@@ -320,7 +333,9 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 				return;
 			}
 			alert(rData.preview);
-		}, 'json');
+		}, 'json').fail(function(rXHR) {
+			dvbNotify('Request failed (' + rXHR.status + '). Check the browser console and the panel log.', 'error');
+		});
 	}
 
 	function dvbDelete(rID) {
@@ -333,7 +348,9 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 			sub: 'delete'
 		}, function() {
 			location.reload();
-		}, 'json');
+		}, 'json').fail(function(rXHR) {
+			dvbNotify('Request failed (' + rXHR.status + '). Check the browser console and the panel log.', 'error');
+		});
 	}
 </script>
 <script src="assets/js/listings.js"></script>

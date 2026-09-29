@@ -261,7 +261,11 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 	</div>
 </div>
 
-<script>
+<?php
+require_once MAIN_HOME . 'Public/Views/layouts/footer.php';
+renderUnifiedLayoutFooter('admin');
+?>
+<script id="scripts">
 	$(function() {
 		// The DES key only means anything to NEWCAMD, and leaving it visible
 		// under CS378X invites someone to fill it in and wonder why nothing
@@ -285,26 +289,31 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 				icon.attr('class', 'mdi mdi-lan-connect');
 
 				if (response.result) {
-					toastr.success(response.note);
+					$.toast({ text: response.note, icon: 'success', position: 'top-right' });
 				} else {
-					toastr.error(response.error);
+					$.toast({ text: response.error, icon: 'error', position: 'top-right' });
 				}
 			}, 'json').fail(function() {
 				button.prop('disabled', false);
 				icon.attr('class', 'mdi mdi-lan-connect');
-				toastr.error('The reachability test could not be run.');
+				$.toast({ text: 'The reachability test could not be run.', icon: 'error', position: 'top-right' });
 			});
 		});
 
 		$('.camd-toggle').on('click', function() {
 			$.post('./api?action=dvb_camd', { sub: 'toggle', id: $(this).data('id') }, function(response) {
 				if (response.result) {
-					toastr.success(response.note);
+					$.toast({ text: response.note, icon: 'success', position: 'top-right' });
 					setTimeout(function() { window.location.reload(); }, 600);
 				} else {
-					toastr.error(response.error);
+					$.toast({ text: response.error, icon: 'error', position: 'top-right' });
 				}
-			}, 'json');
+			}, 'json').fail(function(rXHR) {
+				$.toast({ text: 'Request failed (' + rXHR.status + ').', icon: 'error', position: 'top-right' });
+			});
 		});
 	});
 </script>
+</body>
+
+</html>
