@@ -867,3 +867,48 @@ per server in the UI (HLS, LL-HLS, MPEG-TS, DASH, RTMP, RTSP). Adds
 `modules_archives/flussonic_1.0.0.zip` installs it standalone on an existing
 panel. `Modules/flussonic_1f4a9/dev/` is an offline preview harness, excluded
 from releases but still linted.
+
+## DVB module (TBS6909X) — added in 1.0.0, import still open
+
+`Modules/dvb_9a2c7/` replaces "put Astra or TVHeadend in front of the card and
+import its output" with a panel-native path: define a transponder, scan it, see
+the services. The operator asked for exactly this and explicitly rejected both
+Astra (commercial, subscription) and TVHeadend.
+
+**Architecture, and why.** The panel is on a VPS and cannot hold a PCIe card, so
+the card sits on a separate machine registered as an ordinary XC_VM streaming
+server. Those nodes already point their MySQL at the main server
+(`Cli/Commands/LbInstallFlow.php:155`), so the database is a working,
+authenticated transport — the panel INSERTs into `dvb_jobs`, `cron:dvb` on the
+tuner node claims rows matching its own `SERVER_ID`, drives the hardware and
+writes back.
+
+The obvious alternative was checked and ruled out: `InternalApiController` is a
+fixed `switch` whose `default:` returns `{"result":false}`, with **no module
+hook**. `Router::dispatchApi()` is the panel's admin API, not the node's. A
+module cannot add an internal-API action today.
+
+**Hardware facts confirmed before building.** TBS ships an open-source driver
+(`tbsdtv/media_build` + `tbsdtv/linux_media`, kernels 4.19-6.12), the card
+presents plain `/dev/dvb/adapterN/frontendM`, and TBS itself documents DVBlast
+against the 6909X. Scanning uses `dvbv5-scan` (v4l-utils); DVBlast is the
+intended engine for the streaming half.
+
+**`getCronEntries()` is present and must stay.** `['* * * * *' => 'cron:dvb']`.
+A module that omits it inherits `BaseModule`'s empty array,
+`ModuleLoader::collectCronEntries()` skips it, and the job silently never runs
+even though the command exists and works by hand — the exact bug that kept
+Watch Folder idle until 2.4.4. The queue's only consumer is this cron, so the
+interval is also the worst-case "press Scan → tuner moves" latency.
+
+**Not finished:** importing selected services as panel streams.
+`DvbController::apiImport()` returns an explicit "not yet" instead of failing
+silently. Nothing in core needs changing for playback —
+`Domain/Stream/StreamProcess.php` passes `-i {STREAM_SOURCE}` straight to
+ffmpeg, so `udp://@...` already works.
+
+**Verification gotcha found while building this.** `build/php-structure-check.py`
+does not separate HTML from PHP when tracking quotes: a lone apostrophe in plain
+HTML text (`the card's inputs`) is reported as `unterminated ' string`, and an
+even number of them can mask a real error. Keep apostrophes out of HTML text in
+views, or the tool stops being a usable signal.
