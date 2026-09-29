@@ -1330,3 +1330,45 @@ Two things learned from the real card that are worth not rediscovering:
 the FE_SET_VOLTAGE line as noise, and finishes with a `dvbv5-scan` cross-check.
 dvbv5-scan needs no channel name at all, so if it locks while every zap fails,
 the fault is in the zap invocation rather than in the dish.
+
+## 2.5.5 — the card was fine all along: three bugs, none of them the dish
+
+A manual bench on the real TBS6909X locked on the first try with the settings
+already stored in the panel, and dvbv5-scan listed 21 services:
+
+    Lock (0x1f) Signal= -30,57dBm C/N= 11,60dB
+
+So every "tuner never locked" this module has ever reported on that machine was
+its own doing. Three separate faults, all now fixed.
+
+**1. `dvbv5-scan` has no `-t` option.** `buildCommand()` passed `-t 2`, copied
+from `dvbv5-zap` where `-t` is `--timeout`. dvbv5-scan's options are
+`-3 -a -C -d -f -F -G -I -l -N -o -O -p -S -T -U -v -w -W`; `-t` is rejected,
+so the tool exited without writing an output file, and `scan()` treats a
+missing output file as a failed scan. What the old comment claimed to want --
+do not chase other transponders -- is `-F/--file-freqs-only`, which is what it
+passes now. This is the second time confusing two tools' flags has cost a
+release; the first was `-W/-Y` on tsdecrypt.
+
+**2. `parseSignal()` matched nothing under a non-English locale.** The tools
+print the decimal separator the locale asks for, so a Spanish machine emits
+`Signal= -30,57dBm`. The old pattern `(-?[0-9.]+)` stops at the comma and then
+fails to reach the unit, so *no* reading matched -- not a wrong number, no
+number at all. There is now a single `NUMBER` constant accepting either
+separator and a `toNumber()` that normalises it. Verified against the real log:
+71% bar, quality 55, locked; the old pattern returned empty arrays.
+
+**3. `signal-debug.sh` killed its own scanner.** Section 7 piped a running
+dvbv5-scan into `head -40`. When head exits it closes the pipe, the scanner
+takes SIGPIPE and dies -- after listing all 21 services but before writing its
+output file, which is why the bench said "No services written" and looked like
+it confirmed the panel's failure. Never pipe a long-running producer into
+`head`: capture to a file, then read the file.
+
+The bench now runs both scan commands, the old `-t 2` one and the corrected
+`-F` one, so the difference is demonstrated rather than asserted.
+
+Not a fault, worth recording: `ERROR FE_SET_VOLTAGE: Operation not permitted`
+is noise `dvb-fe-tool` prints on exit on TBS cards, present on cards that lock
+perfectly (tbsdtv/linux_media#401). And `MODULATION` has no `AUTO` value,
+though `INNER_FEC` does.

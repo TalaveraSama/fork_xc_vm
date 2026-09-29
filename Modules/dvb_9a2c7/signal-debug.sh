@@ -171,19 +171,53 @@ try "DiSEqC port 2 (0-based 1)"    "$DELSYS" "$POL"      "AUTO" "QPSK"  "$LNB" "
 # failed, the problem is the zap invocation, not the dish.
 
 head2 "7. Cross-check with dvbv5-scan (no channel name involved)"
+
+# NEVER pipe a running scanner into head: when head exits it closes the pipe,
+# the scanner takes SIGPIPE and dies before it writes its output file. That is
+# what made an earlier run of this script report "No services written" even
+# though the scan had already listed every service. Capture to a file, then
+# read the file.
+
+run_scan() {
+	label=$1 outconf=$2 logf=$3
+	shift 3
+	printf '\n%s\n' "$label"
+	printf '    %s\n\n' "$*"
+	timeout -k 1 180 "$@" > "$logf" 2>&1
+	rc=$?
+	sed 's/^/    /' "$logf" | head -25
+	printf '    [exit %d]\n' "$rc"
+	if [ -s "$outconf" ]; then
+		printf '    >>> output file written: %s services <<<\n' "$(grep -c '^\[' "$outconf")"
+		grep '^\[' "$outconf" | head -25 | sed 's/^/      /'
+		return 0
+	fi
+	printf '    no output file written.\n'
+	return 1
+}
+
 if command -v dvbv5-scan >/dev/null 2>&1; then
-	write_conf "$DELSYS" "$POL" "AUTO" "QPSK"
-	set -- dvbv5-scan -a "$ADAPTER" -f 0 -l "$LNB"
+	write_conf "$DELSYS" "$POL" "2/3" "PSK/8"
+
+	# 7a. What the panel sent before 2.5.5. dvbv5-scan has no -t option (that
+	#     is dvbv5-zap's --timeout), so this is expected to be rejected
+	#     outright. Shown so the failure is visible rather than assumed.
+	set -- dvbv5-scan -a "$ADAPTER" -f 0 -o "$WORK/old.conf" -O DVBV5 -t 2 -l "$LNB"
 	[ -n "$DISEQC" ] && set -- "$@" -S "$DISEQC"
-	set -- "$@" -o "$WORK/found.conf" "$WORK/try.conf"
-	printf '  %s\n\n' "$*"
-	timeout -k 1 90 "$@" 2>&1 | sed 's/^/  /' | head -40
-	if [ -s "$WORK/found.conf" ]; then
-		printf '\n  Services found: %s\n' "$(grep -c '^\[' "$WORK/found.conf")"
-		grep '^\[' "$WORK/found.conf" | head -20 | sed 's/^/    /'
+	set -- "$@" "$WORK/try.conf"
+	run_scan "7a. the old panel command, with -t 2 (expected to FAIL)" \
+		"$WORK/old.conf" "$WORK/old.log" "$@"
+
+	# 7b. The corrected command: -F keeps the scan on this transponder instead
+	#     of chasing every frequency the NIT advertises.
+	set -- dvbv5-scan -a "$ADAPTER" -f 0 -o "$WORK/new.conf" -O DVBV5 -F -l "$LNB"
+	[ -n "$DISEQC" ] && set -- "$@" -S "$DISEQC"
+	set -- "$@" "$WORK/try.conf"
+	if run_scan "7b. the corrected command, with -F (expected to WORK)" \
+		"$WORK/new.conf" "$WORK/new.log" "$@"; then
 		LOCKED=1
-	else
-		printf '\n  No services written.\n'
+		cp "$WORK/new.conf" /tmp/dvb-scan-result.conf 2>/dev/null &&
+			printf '\n    Saved a copy at /tmp/dvb-scan-result.conf\n'
 	fi
 else
 	printf '  dvbv5-scan not installed.\n'

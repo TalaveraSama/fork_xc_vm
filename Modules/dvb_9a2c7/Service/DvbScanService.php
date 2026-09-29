@@ -297,11 +297,16 @@ class DvbScanService {
 			'-f ' . (int) ($rA['frontend_num'] ?? 0),
 			'-o ' . escapeshellarg($rOut),
 			'-O DVBV5',
-			// Read the NIT so the scan reports services the SDT alone misses,
-			// but do not chase other transponders: the operator asked about
-			// this one, and following the NIT across a whole satellite turns a
-			// 30-second scan into a 40-minute one.
-			'-t 2',
+			// Stay on the transponder the operator asked about. Without this,
+			// dvbv5-scan adds every frequency it learns from the NIT to its
+			// own work queue and walks the whole satellite, which outlasts
+			// SCAN_TIMEOUT and so leaves no output file behind.
+			//
+			// This used to read '-t 2', copied from dvbv5-zap where -t is
+			// --timeout. dvbv5-scan has no -t at all: it rejected the command
+			// line, wrote nothing, and every scan reported "tuner never
+			// locked" while the card was in fact locking perfectly.
+			'-F',
 		];
 
 		if (in_array(strtoupper((string) ($rT['delivery_system'] ?? '')), self::SATELLITE, true)) {
@@ -437,6 +442,19 @@ class DvbScanService {
 	 * @param string $rLog Scanner output.
 	 * @return array{strength:?int,quality:?int,locked:bool}
 	 */
+	/** Capture group for one number, with either decimal separator. */
+	private const NUMBER = '(-?[0-9]+(?:[.,][0-9]+)?)';
+
+	/**
+	 * Read a number the tools printed under the machine's locale.
+	 *
+	 * @param string $rValue e.g. "-30,57" or "-30.57".
+	 * @return float
+	 */
+	private static function toNumber($rValue) {
+		return (float) str_replace(',', '.', (string) $rValue);
+	}
+
 	public static function parseSignal($rLog) {
 		$rStrength = null;
 		$rQuality  = null;
@@ -449,10 +467,15 @@ class DvbScanService {
 		// "-33.40dBm" is never mistaken for 33% -- and note the leading -? on
 		// every number here: without it a negative reading parses as its own
 		// absolute value, which reads as a healthy signal.
-		if (preg_match_all('/Signal\s*=\s*(-?[0-9.]+)\s*%/i', $rLog, $rMatches) > 0) {
-			$rStrength = (int) max(0, min(100, round((float) end($rMatches[1]))));
-		} elseif (preg_match_all('/Signal\s*=\s*(-?[0-9.]+)\s*dBm/i', $rLog, $rMatches) > 0) {
-			$rStrengthDbm = (float) end($rMatches[1]);
+		//
+		// The decimal separator follows the machine's locale. A Spanish box
+		// prints "Signal= -30,57dBm", and a pattern that only accepts a dot
+		// matches nothing at all there, so every reading silently vanishes.
+		// NUMBER takes either separator; toNumber() normalises it.
+		if (preg_match_all('/Signal\s*=\s*' . self::NUMBER . '\s*%/i', $rLog, $rMatches) > 0) {
+			$rStrength = (int) max(0, min(100, round(self::toNumber(end($rMatches[1])))));
+		} elseif (preg_match_all('/Signal\s*=\s*' . self::NUMBER . '\s*dBm/i', $rLog, $rMatches) > 0) {
+			$rStrengthDbm = self::toNumber(end($rMatches[1]));
 
 			// Map dBm onto the same 0..100 bar. A Ku tuner sees roughly -75 dBm
 			// at the noise floor and -25 dBm on a strong carrier, so that span
@@ -464,8 +487,8 @@ class DvbScanService {
 		// column usable for both without pretending the units are the same;
 		// anything above 20 dB is excellent on satellite anyway. It can be
 		// negative when the demodulator is not locked.
-		if (preg_match_all('/C\/N\s*=\s*(-?[0-9.]+)\s*dB/i', $rLog, $rMatches) > 0) {
-			$rCnrDb   = (float) end($rMatches[1]);
+		if (preg_match_all('/C\/N\s*=\s*' . self::NUMBER . '\s*dB/i', $rLog, $rMatches) > 0) {
+			$rCnrDb   = self::toNumber(end($rMatches[1]));
 			$rQuality = (int) max(0, min(100, round($rCnrDb * 5)));
 		}
 

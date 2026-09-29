@@ -2,7 +2,7 @@
     "name": "dvb",
     "hash_id": "9a2c7f1e4b8d0637a5c9e2148b6fd3a0",
     "description": "Native DVB tuner support: enumerate TBS and other Linux DVB adapters on any streaming server, define satellite/cable/terrestrial transponders, scan them for services, and import the ones you pick as live channels fed by DVBlast. Encrypted services can be descrambled in place through a NEWCAMD or CS378X card server. Uses the kernel DVB API, so no Astra or TVHeadend is required.",
-    "version": "1.2.5",
+    "version": "1.2.6",
     "requires_core": ">=2.4.4",
     "environment": "any",
     "priority": 0,
