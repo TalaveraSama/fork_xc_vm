@@ -70,8 +70,10 @@ class DvbDecryptRunner {
 			return ['status' => true, 'message' => 'Already decrypting.'];
 		}
 
-		if (!self::ensureWorkDir()) {
-			return ['status' => false, 'message' => 'Could not create the DVB scratch directory.'];
+		$rWhy = self::ensureWorkDir();
+
+		if ($rWhy !== null) {
+			return ['status' => false, 'message' => 'Could not use the DVB scratch directory. ' . $rWhy];
 		}
 
 		// tsdecrypt daemonises itself and writes the pid file, so there is no
@@ -603,16 +605,21 @@ class DvbDecryptRunner {
 	/**
 	 * Make sure the scratch directory exists.
 	 *
-	 * @return bool
+	 * @return string|null Null when usable, otherwise why not.
 	 */
 	private static function ensureWorkDir() {
-		$rPath = self::workDir();
+		$rPath   = self::workDir();
+		$rParent = dirname(rtrim($rPath, '/'));
 
 		if (!is_dir($rPath) && !@mkdir($rPath, 0755, true) && !is_dir($rPath)) {
-			return false;
+			return DvbScanService::describePath($rParent);
 		}
 
-		return is_writable($rPath);
+		if (!is_writable($rPath)) {
+			return DvbScanService::describePath($rPath);
+		}
+
+		return null;
 	}
 
 	/**

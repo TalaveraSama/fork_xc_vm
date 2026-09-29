@@ -1621,3 +1621,33 @@ None of the protocol notes above are wrong, and the account and CAID advice
 still applies once the chain runs. But the live blocker was never decryption:
 dvblast does not start, so there is no transport stream, so no decryptor is
 ever spawned, so nothing connects to the card server.
+
+## 2.6.1 — the real blocker, and a dead-end error message
+
+2.6.0 made `supervise()` show its reason, and the transponder row answered
+immediately:
+
+    Could not write the DVBlast config to /home/xc_vm/tmp/cache/dvb/tp1.conf.
+
+Two things follow. First, the actual scratch path is
+`CACHE_TMP_PATH/dvb/` = `/home/xc_vm/tmp/cache/dvb/`, **not**
+`/home/xc_vm/tmp/dvb/`. `stream-debug.sh` was looking in the latter and
+reported "nothing has ever been started" from the wrong directory — right
+conclusion, wrong evidence. It now probes all three candidates, prints which
+exist, and on finding none lists `ls -ld` of the parents, which is where a
+permission problem is visible.
+
+Second, that message was itself a dead end: it names the file and stops. It
+cannot distinguish a missing parent from a directory owned by the wrong user,
+which need different fixes. `ensureWorkDir()` in both runners now returns the
+reason instead of a bool, built by the shared
+`DvbScanService::describePath()`: which user the process runs as, who owns the
+directory, its mode, whether it is writable, and the `chown` that fixes it.
+
+Care needed at the call sites — both read `if (!self::ensureWorkDir())`, and
+returning null for success inverts that into failure-on-success. Both were
+rewritten to `$rWhy = ...; if ($rWhy !== null)`.
+
+The likely cause on that node is ownership: `console.php` has been run as root
+several times this session, and `update` does `cp -a`, so parts of
+`/home/xc_vm` can end up root-owned while `cron:dvb` runs as `xc_vm`.

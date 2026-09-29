@@ -455,6 +455,47 @@ class DvbScanService {
 		return (float) str_replace(',', '.', (string) $rValue);
 	}
 
+	/**
+	 * Say why a path cannot be written to, in terms an operator can act on.
+	 *
+	 * "Could not write the config" is a dead end. Which user is running, who
+	 * owns the directory and what mode it carries turns the same failure into
+	 * an instruction. Shared by both runners so the wording cannot drift.
+	 *
+	 * @param string $rPath Directory being written to.
+	 * @return string
+	 */
+	public static function describePath($rPath) {
+		$rUser = 'unknown';
+
+		if (function_exists('posix_geteuid')) {
+			$rUser = (string) posix_geteuid();
+
+			if (function_exists('posix_getpwuid')) {
+				$rInfo = @posix_getpwuid(posix_geteuid());
+				$rUser = !empty($rInfo['name']) ? (string) $rInfo['name'] : $rUser;
+			}
+		}
+
+		if (!file_exists($rPath)) {
+			return 'Running as "' . $rUser . '" and ' . $rPath . ' does not exist,'
+				. ' nor could it be created. Fix with: mkdir -p ' . $rPath
+				. ' && chown -R xc_vm:xc_vm ' . $rPath;
+		}
+
+		$rOwner = (string) @fileowner($rPath);
+
+		if (function_exists('posix_getpwuid')) {
+			$rInfo  = @posix_getpwuid((int) @fileowner($rPath));
+			$rOwner = !empty($rInfo['name']) ? (string) $rInfo['name'] : $rOwner;
+		}
+
+		return 'Running as "' . $rUser . '". ' . $rPath . ' is owned by "' . $rOwner
+			. '", mode ' . substr(sprintf('%o', (int) @fileperms($rPath)), -4)
+			. ', and is ' . (is_writable($rPath) ? 'writable' : 'NOT writable by this user')
+			. '. Fix with: chown -R xc_vm:xc_vm ' . $rPath;
+	}
+
 	public static function parseSignal($rLog) {
 		$rStrength = null;
 		$rQuality  = null;

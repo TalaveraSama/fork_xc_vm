@@ -31,25 +31,36 @@
 # break, but the same two requirements: the ECMs must reach the descrambler,
 # and the descrambler must be looking for the right CA system.
 
-WORK=${WORK:-/home/xc_vm/tmp/dvb}
+# CACHE_TMP_PATH is /home/xc_vm/tmp/cache/, not /home/xc_vm/tmp/. Getting this
+# wrong made an earlier run of this script report "nothing has ever been
+# started" while looking in a directory the module never uses.
+WORK=${WORK:-}
 SECS=${SECS:-6}
 
 rule() { printf '\n%s\n' '--------------------------------------------------------------'; }
 head2() { rule; printf '%s\n\n' "$1"; }
 
 head2 "1. Work directory"
-if [ ! -d "$WORK" ]; then
-	printf '  %s does not exist.\n' "$WORK"
-	for d in /home/xc_vm/tmp/dvb /tmp/dvb; do
-		[ -d "$d" ] && { printf '  Found one at %s, using it.\n' "$d"; WORK=$d; break; }
-	done
+CANDIDATES="/home/xc_vm/tmp/cache/dvb /home/xc_vm/tmp/dvb /tmp/dvb"
+if [ -n "$WORK" ]; then
+	CANDIDATES="$WORK $CANDIDATES"
 fi
-if [ ! -d "$WORK" ]; then
-	printf '\n  No DVB work directory anywhere. Nothing has ever been started.\n'
-	printf '  Start the transponder from the panel first.\n'
+FOUNDDIR=""
+for d in $CANDIDATES; do
+	printf '  %-32s %s\n' "$d" "$([ -d "$d" ] && echo exists || echo 'not there')"
+	[ -d "$d" ] && [ -z "$FOUNDDIR" ] && FOUNDDIR=$d
+done
+if [ -z "$FOUNDDIR" ]; then
+	printf '\n  None of them exist, so dvblast was never launched: start() creates\n'
+	printf '  this directory before writing its config. Ask the panel why:\n\n'
+	printf '    /home/xc_vm/bin/php/bin/php /home/xc_vm/console.php cron:dvb\n\n'
+	printf '  Parent directory, which is where a permission problem shows up:\n'
+	ls -ld /home/xc_vm/tmp /home/xc_vm/tmp/cache 2>&1 | sed 's/^/    /'
 	exit 1
 fi
-printf '  %s\n\n' "$WORK"
+WORK=$FOUNDDIR
+printf '\n  using %s\n\n' "$WORK"
+ls -ld "$WORK" | sed 's/^/    /'
 ls -la "$WORK" | sed 's/^/    /'
 
 head2 "2. Is dvblast running?"

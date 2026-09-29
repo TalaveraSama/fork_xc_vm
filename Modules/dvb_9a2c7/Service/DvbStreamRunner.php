@@ -93,8 +93,18 @@ class DvbStreamRunner {
 
 		self::stop($rTransponder);
 
-		if (!self::ensureWorkDir() || file_put_contents($rPath, $rConfig) === false) {
-			return ['status' => false, 'message' => 'Could not write the DVBlast config to ' . $rPath . '.'];
+		$rWhy = self::ensureWorkDir();
+
+		if ($rWhy !== null) {
+			return ['status' => false, 'message' => 'Could not write the DVBlast config to ' . $rPath . '. ' . $rWhy];
+		}
+
+		if (file_put_contents($rPath, $rConfig) === false) {
+			return [
+				'status'  => false,
+				'message' => 'Could not write the DVBlast config to ' . $rPath . '. '
+					. DvbScanService::describePath(dirname($rPath)),
+			];
 		}
 
 		$rCommand = self::buildCommand($rBinary, $rTransponder, $rAdapter, $rPath, $rServices);
@@ -552,16 +562,21 @@ class DvbStreamRunner {
 	/**
 	 * Make sure the scratch directory exists.
 	 *
-	 * @return bool
+	 * @return string|null Null when usable, otherwise why not.
 	 */
 	private static function ensureWorkDir() {
-		$rPath = self::workDir();
+		$rPath   = self::workDir();
+		$rParent = dirname(rtrim($rPath, '/'));
 
 		if (!is_dir($rPath) && !@mkdir($rPath, 0755, true) && !is_dir($rPath)) {
-			return false;
+			return DvbScanService::describePath($rParent);
 		}
 
-		return is_writable($rPath);
+		if (!is_writable($rPath)) {
+			return DvbScanService::describePath($rPath);
+		}
+
+		return null;
 	}
 
 	/**
