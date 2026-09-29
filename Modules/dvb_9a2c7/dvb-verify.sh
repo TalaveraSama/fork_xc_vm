@@ -93,21 +93,45 @@ head2 "4. Tuners"
 if [ ! -d /dev/dvb ]; then
 	bad "/dev/dvb does not exist: the driver is not loaded"
 else
+	FREEADAPTER=""
+	PANELLIVE=0
 	for a in /dev/dvb/adapter*; do
 		n=${a##*/adapter}
 		fe="$a/frontend0"
 		[ -e "$fe" ] || continue
 		holder=$(fuser "$fe" 2>/dev/null | tr -d ' ')
 		if [ -n "$holder" ]; then
-			printf '    adapter%-2s held by pid %s (%s)\n' "$n" "$holder" \
-				"$(ps -o comm= -p "$holder" 2>/dev/null)"
+			who=$(ps -o comm= -p "$holder" 2>/dev/null)
+			case "$who" in
+				dvblast|tsdecrypt)
+					printf '    adapter%-2s IN USE BY THE PANEL: %s (pid %s)\n' "$n" "$who" "$holder"
+					PANELLIVE=1
+					;;
+				*)
+					printf '    adapter%-2s held by %s (pid %s) - not the panel\n' "$n" "$who" "$holder"
+					;;
+			esac
 		else
-			printf '    adapter%-2s free   %s\n' "$n" "$(ls -l "$fe" | awk '{print $1, $3, $4}')"
+			printf '    adapter%-2s free\n' "$n"
+			[ -z "$FREEADAPTER" ] && FREEADAPTER=$n
 		fi
 	done
 	printf '\n'
+
+	# A tuner held by our own dvblast is the system working, not a fault. The
+	# earlier version of this script called that a failure and sent people off
+	# to kill the very process they were trying to get running.
+	if [ "$PANELLIVE" = "1" ]; then
+		ok "the panel is already streaming on at least one tuner"
+	fi
+
 	if [ -n "$(fuser /dev/dvb/adapter$ADAPTER/frontend0 2>/dev/null)" ]; then
-		bad "adapter $ADAPTER is busy; free it before testing"
+		if [ -n "$FREEADAPTER" ]; then
+			printf '  note  adapter %s is taken, testing on free adapter %s instead\n' "$ADAPTER" "$FREEADAPTER"
+			ADAPTER=$FREEADAPTER
+		else
+			bad "every tuner is busy; nothing left to test with"
+		fi
 	else
 		ok "adapter $ADAPTER is free"
 	fi
@@ -150,7 +174,7 @@ if [ -s "$OUT" ]; then
 	grep '^\[' "$OUT" | sed 's/^/      /'
 	printf '\n  The DVB side is healthy: %s can open the tuner, lock the\n' "$PANELUSER"
 	printf '  carrier and enumerate services. Anything still broken is\n'
-	printf '  downstream of here.\n'
+	printf '  downstream of here -- run stream-debug.sh next.\n'
 else
 	bad "no services written"
 	if grep -qi 'busy' "$WORK/verify.log"; then

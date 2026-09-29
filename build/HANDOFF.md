@@ -1673,3 +1673,28 @@ Flags were cross-checked against the module: `-F`, `-O DVBV5`, `-a`, `-f`,
 `-o`, `-l` and a conditional `-S`. Note that grepping `buildCommand()` for
 flags still turns up `-t 2` — that is the comment recording the 2.5.5 bug, not
 code. Easy to misread, as happened once while writing this.
+
+## dvb-verify.sh correction — a busy tuner can mean success
+
+The permission fix worked: `/home/xc_vm/tmp/cache/dvb` was created owned by
+`xc_vm`, and `cron:dvb` started dvblast, which claimed adapter0. The verify
+script then reported:
+
+    adapter0  held by pid 3646 (dvblast)
+    FAIL  adapter 0 is busy; free it before testing
+
+That is exactly backwards. A frontend held by our own `dvblast` is the module
+working, and the script was telling the operator to kill the process they had
+spent the whole session trying to start. It now names the holder, treats
+`dvblast`/`tsdecrypt` as the panel running, and falls through to a free
+adapter for its own test rather than fighting the live one.
+
+Generalising it, since this is the fourth variant of the same mistake in this
+module: **a check that reports a state must also interpret it.** "Busy" is not
+a verdict until you know who holds it, the same way "running" was not a
+verdict for tsdecrypt in 2.5.8 and "no lock" was not a verdict for a frontend
+that was never opened in 2.5.6.
+
+Practical follow-on: manual capture tests must target a free adapter. On this
+card adapter7 is held by an unrelated process called `streamer`, adapter0 by
+the panel, and 1-6 are free.
