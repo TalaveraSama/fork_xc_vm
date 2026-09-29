@@ -72,25 +72,52 @@ apt-get install dvb-tools dvblast
 streaming. `dvb-fe-tool` is optional: without it adapters are still discovered,
 they just show up unnamed.
 
-To descramble encrypted services you also need **`tsdecrypt`**, which most
-distributions do not package:
+To descramble encrypted services you also need **`tsdecrypt`**, which no
+distribution packages. Its source is vendored in this module, so there is
+nothing to download:
 
 ```sh
-apt-get install build-essential git libssl-dev libdvbcsa-dev
-git clone https://github.com/gfto/tsdecrypt.git
-cd tsdecrypt
-git submodule update --init --recursive
-make && make install
+sh /home/xc_vm/Modules/dvb_9a2c7/install-tuner-node.sh
 ```
 
-`libdvbcsa-dev` is not optional with a plain `make`: that is the descrambling
-library tsdecrypt links against by default. The alternative is `make ffdecsa`,
-which uses the copy of FFdecsa shipped in the source tree and needs no external
-library — it is up to 40% faster on older CPUs but slower for file input, which
-is not how this module uses it. Either works.
+That script does everything on this page — packages, tsdecrypt, the `video`
+group and the cron entry — and is safe to run again. Prefer it to doing the
+steps by hand.
 
-It is only needed on the tuner node, and only if you actually have a card
-server. Free-to-air services never touch it.
+To build tsdecrypt alone:
+
+```sh
+apt-get install build-essential libssl-dev
+cp -a /home/xc_vm/Modules/dvb_9a2c7/vendor/tsdecrypt /tmp/tsdecrypt
+cd /tmp/tsdecrypt && make ffdecsa && make install
+```
+
+OpenSSL is the only external dependency (tsdecrypt uses its MD5, DES and AES).
+`make ffdecsa` uses the FFdecsa implementation shipped inside the source tree,
+so libdvbcsa is not needed.
+
+### Why the source is vendored rather than cloned
+
+The upstream build instructions are `git clone` followed by
+`git submodule update --init`, and that quietly does not work, because
+tsdecrypt's `.gitmodules` points its two submodules at the author's own server
+rather than at GitHub:
+
+    url = https://georgi.unixsol.org/git/gfto/libtsfuncs.git
+    url = https://georgi.unixsol.org/git/gfto/libfuncs.git
+
+When that host is unreachable the clone still *succeeds*, leaving `libfuncs`
+and `libtsfuncs` as empty directories, and the build then fails much later with
+a missing-header error that points nowhere near the real cause. Both libraries
+are mirrored on GitHub, which is where this copy comes from — see
+`vendor/PROVENANCE.txt` for the pinned commits.
+
+The source ships rather than a binary because `FFdecsa_init` benchmarks the CPU
+at build time to pick the fastest descrambling variant. A prebuilt binary would
+be either slower everywhere or an illegal instruction on an older machine.
+
+tsdecrypt is only needed on the tuner node, and only if you actually have a
+card server. Free-to-air services never touch it.
 
 ### 3. Permissions
 

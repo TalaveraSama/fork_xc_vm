@@ -1,0 +1,51 @@
+tsdecrypt, vendored source
+==========================
+
+Upstream:  https://github.com/gfto/tsdecrypt
+License:   GNU GPL v2 (see tsdecrypt/COPYING)
+
+Pinned commits, fetched 2026-09-29:
+
+tsdecrypt    f4876e84cf1866645f84b93f830af67193c85f69
+libfuncs     55d6236c87e8920563b89af6cd1bf276b423a9a7
+libtsfuncs   1482ed310186c4fecec2e409e1125316c51cf9c5
+
+Why this is vendored instead of cloned at install time
+------------------------------------------------------
+
+tsdecrypt keeps libfuncs and libtsfuncs as git submodules, and its
+.gitmodules points them at the author's own server:
+
+    url = https://georgi.unixsol.org/git/gfto/libtsfuncs.git
+    url = https://georgi.unixsol.org/git/gfto/libfuncs.git
+
+So the documented "git clone && git submodule update --init" only works while
+that host is up. It is one person's box, not a mirror network, and when it is
+unreachable the clone succeeds with two EMPTY directories and the build fails
+much later with a confusing missing-header error. Both libraries are also
+published on GitHub, which is what this copy uses.
+
+Vendoring the three trees means a tuner node builds from what the release
+already put on disk, with no network access at all.
+
+Not a binary
+------------
+
+The source is shipped, not a compiled tsdecrypt, and that is deliberate.
+FFdecsa_init benchmarks the CPU at build time to pick the fastest descrambling
+variant (usually PARALLEL_128_SSE2), so the result is specific to the machine
+that compiled it. A prebuilt binary would either be slower everywhere or crash
+with an illegal instruction on an older CPU.
+
+Updating
+--------
+
+    git clone --depth 1 https://github.com/gfto/tsdecrypt.git
+    git clone --depth 1 https://github.com/gfto/libfuncs.git
+    git clone --depth 1 https://github.com/gfto/libtsfuncs.git
+    rm -rf tsdecrypt/libfuncs tsdecrypt/libtsfuncs
+    cp -a libfuncs tsdecrypt/libfuncs
+    cp -a libtsfuncs tsdecrypt/libtsfuncs
+    find tsdecrypt -name .git -prune -exec rm -rf {} +
+
+then replace vendor/tsdecrypt with the result and update the commits above.

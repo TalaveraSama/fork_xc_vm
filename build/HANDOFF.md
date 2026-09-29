@@ -1024,3 +1024,39 @@ leave every already-installed panel without the columns. Master and delta were
 diffed column by column; they agree. Also added the `database_drop.sql` the
 module had been missing since 1.0.0, so uninstalling no longer strands five
 tables.
+
+### 2.4.7 — tsdecrypt vendored, plus a tuner-node installer
+
+`Modules/dvb_9a2c7/install-tuner-node.sh` now does the whole node setup in one
+idempotent pass: dvb-tools and dvblast, building tsdecrypt, the `video` group,
+and `console.php startup` so `cron:dvb` actually lands in the crontab. Written
+for dash, not bash, because someone will run it as `sh script`.
+
+**The upstream tsdecrypt build instructions do not work reliably, and fail in
+a way that hides the cause.** `.gitmodules` points libfuncs and libtsfuncs at
+`georgi.unixsol.org`, the author's own box, not GitHub. When it is unreachable
+`git clone && git submodule update --init` still *succeeds*, leaving two empty
+directories; the build then dies on a missing header far from the real fault.
+Both libraries are mirrored on GitHub, so all three trees are vendored under
+`Modules/dvb_9a2c7/vendor/tsdecrypt/` with the commits pinned in
+`vendor/PROVENANCE.txt`. A tuner node now builds from what the release already
+put on disk, with no network at all. 128 files, 1.1 MB.
+
+Two corrections to what 2.4.6 documented:
+
+- **libdvbcsa is not a dependency.** tsdecrypt's README says libdvbcsa is the
+  default library, but current master has `all: ffdecsa` — FFdecsa ships in
+  the tree and is the default target. OpenSSL is the only external dependency.
+  The 2.4.6 README told people to install `libdvbcsa-dev`, which was harmless
+  but wrong.
+- **Source, not a binary, on purpose.** `FFdecsa_init` benchmarks the CPU at
+  build time to choose the descrambling variant, so the output is specific to
+  the machine that compiled it. Shipping a binary would be slower everywhere
+  or an illegal instruction on older hardware.
+
+Verified by building the vendored tree in the sandbox: libfuncs and libtsfuncs
+compile through to `libtsfuncs.a`, and the build stops only at
+`openssl/aes.h`, which is absent there. Executable bits on
+`install-tuner-node.sh` and `FFdecsa_init` are 100755 in the index, and the
+vendored `.gitignore` files exclude only build artefacts (128 files on disk,
+128 in the index).

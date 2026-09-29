@@ -30,7 +30,7 @@ define('DEV_MODE', false);
 
 // ── Version & Git Configuration ────────────────────────────────
 
-define('XC_VM_VERSION', '2.4.6');
+define('XC_VM_VERSION', '2.4.7');
 
 define('GIT_OWNER',       'Vateron-Media');
 define('GIT_REPO_MAIN',   'fork_xc_vm');
