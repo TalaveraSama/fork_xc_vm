@@ -99,6 +99,35 @@ def api(path):
         return json.load(r)
 
 
+def api_list(path, cap=1000):
+    """Page through a list endpoint.
+
+    GitHub returns 30 items per page by default and this repository passed
+    that long ago, which silently pushed the binaries-* mirror onto page two:
+    the verifier then reported that no binaries release existed at all and
+    failed a release that was perfectly fine. Anything listing a collection
+    has to page.
+    """
+    out = []
+    page = 1
+    sep = "&" if "?" in path else "?"
+
+    while len(out) < cap:
+        chunk = api(f"{path}{sep}per_page=100&page={page}")
+
+        if not isinstance(chunk, list) or not chunk:
+            break
+
+        out.extend(chunk)
+
+        if len(chunk) < 100:
+            break
+
+        page += 1
+
+    return out
+
+
 def fetch(url, dest):
     req = urllib.request.Request(url, headers={"User-Agent": "xc_vm-verify-release"})
     with urllib.request.urlopen(req, timeout=300) as r, open(dest, "wb") as f:
@@ -145,7 +174,7 @@ def read_hashes(path):
 def release_by_tag(owner, repo, tag):
     if tag:
         return api(f"/repos/{owner}/{repo}/releases/tags/{tag}")
-    for rel in api(f"/repos/{owner}/{repo}/releases"):
+    for rel in api_list(f"/repos/{owner}/{repo}/releases"):
         if not rel["draft"] and not rel["prerelease"]:
             return rel
     raise SystemExit(f"{owner}/{repo} has no published stable release")
@@ -153,7 +182,7 @@ def release_by_tag(owner, repo, tag):
 
 def latest_binaries(owner, repo):
     """The newest binaries-* mirror release, or upstream's own latest."""
-    for rel in api(f"/repos/{owner}/{repo}/releases"):
+    for rel in api_list(f"/repos/{owner}/{repo}/releases"):
         if not rel["draft"] and str(rel["tag_name"]).startswith("binaries-"):
             return rel
     return None

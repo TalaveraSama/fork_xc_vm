@@ -1980,3 +1980,27 @@ in one place, and control words cached out of the critical path.
 
 The EMM checkbox now carries the numbers rather than a vague "off unless the
 provider asks for it".
+
+## verify-release.py — the release cadence outgrew the API page size
+
+`verify-2.6.8` failed with:
+
+    TalaveraSama/fork_xc_vm publishes no binaries-* release, so the installer
+    has nowhere to get bin/php/bin/php, ...
+
+The release existed. `binaries-29062026` was sitting at index **30** of 61
+releases, which is the first item of page two, and `api()` fetched a single
+page. GitHub returns 30 items by default, so `latest_binaries()` simply never
+saw it. Thirteen consecutive verifications had passed before the repository
+crossed that boundary, which is a good reminder that a check can rot without
+anyone touching it.
+
+`api_list()` now pages with `per_page=100` until a short page comes back, and
+both `/releases` walks use it. Verified against the live API: 61 releases
+enumerated, mirror found.
+
+Two things worth keeping in mind. A failing verification is not automatically
+a bad release — this one was fine and the verifier was wrong, which is why the
+first move was to re-run it rather than to pull the release. And the `base-*`
+releases double the count, so the page boundary arrives twice as fast as the
+version numbers suggest.
