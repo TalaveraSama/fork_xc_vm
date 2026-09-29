@@ -1698,3 +1698,39 @@ that was never opened in 2.5.6.
 Practical follow-on: manual capture tests must target a free adapter. On this
 card adapter7 is held by an unrelated process called `streamer`, adapter0 by
 the panel, and 1-6 are free.
+
+## 2.6.2 — a 156 MB log in five minutes, and a pin that was not honoured
+
+The chain now runs: dvblast holds adapter0 and all 21 UDP ports carry traffic.
+Two faults showed up in the same capture.
+
+**The log.** `tp1.log` reached 156 MB in roughly five minutes. dvblast emits
+one `couldn't writev to 127.0.0.1:NNNNN (Connection refused)` per packet per
+port that has no reader, and until the panel's consumers start, that is every
+port. `start()` appends with `>>` and nothing bounded it. `supervise()` now
+calls `trimLog()` on every pass, keeping the last 64 KB once the file passes
+4 MB. Safe against the live process because dvblast holds the file `O_APPEND`
+and so continues at the new end.
+
+**The pin.** The transponder form offers "Any free tuner on that server" or a
+specific adapter. `pick()` honoured a pinned `adapter_id` unconditionally:
+
+    if ($rPinned !== null) { return $rPinned; }
+
+so a second transponder pinned to a tuner the first was already streaming on
+got it handed back, and the failure resurfaced downstream as "Device or
+resource busy" — which reads like a hardware fault rather than two carriers
+competing. `pick()` now refuses a pin held by a *different* transponder.
+
+It deliberately does not fall through to any free tuner in that case: a pin
+usually means that port is cabled to a particular dish, and quietly switching
+would scan the wrong satellite. `start()` instead reports which transponder
+holds the pinned adapter and suggests repinning or "Any free tuner".
+
+Two operator-side notes from the same session. dvblast was running without
+`-Y`/`-W` because no service had a `camd_id`: those flags are added only when
+`decrypting()` is true for some service on the carrier, so assigning the CAMD
+and letting the transponder restart is what turns ECM passthrough on. And
+`dvbv5-zap` in record mode (`-P -r`) wants the **channel name**, while monitor
+mode (`-m`) wants the **frequency** — the two forms in the synopsis are not
+interchangeable, which cost a confusing "Can't find channel".

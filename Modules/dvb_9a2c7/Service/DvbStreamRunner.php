@@ -76,6 +76,19 @@ class DvbStreamRunner {
 		$rAdapter = DvbAdapterService::pick($rTransponder);
 
 		if ($rAdapter === null) {
+			if (!empty($rTransponder['adapter_id'])) {
+				$rPinned = DvbAdapterService::find((int) $rTransponder['adapter_id']);
+
+				if ($rPinned !== null && !empty($rPinned['in_use_by'])) {
+					return [
+						'status'  => false,
+						'message' => 'This transponder is pinned to adapter ' . (int) $rPinned['adapter_num']
+							. ', which transponder ' . (int) $rPinned['in_use_by'] . ' is already using.'
+							. ' Pin it to a different tuner, or set it to "Any free tuner".',
+					];
+				}
+			}
+
 			return ['status' => false, 'message' => 'No tuner available on this node. Run Discover adapters first.'];
 		}
 
@@ -203,6 +216,8 @@ class DvbStreamRunner {
 
 		foreach ($rRows as $rTransponder) {
 			$rID = (int) $rTransponder['id'];
+
+			self::trimLog($rID);
 
 			if (empty($rTransponder['streaming'])) {
 				self::stop($rTransponder);
@@ -564,6 +579,36 @@ class DvbStreamRunner {
 	 *
 	 * @return string|null Null when usable, otherwise why not.
 	 */
+	/** Bytes of DVBlast log to keep before trimming. */
+	private const LOG_CAP = 4194304;
+
+	/**
+	 * Stop a DVBlast log from filling the disk.
+	 *
+	 * DVBlast writes one "couldn't writev ... Connection refused" per packet
+	 * per port with no reader, and a transponder with 21 services and nothing
+	 * consuming them produced 156 MB in about five minutes. That is a disk
+	 * outage waiting to happen on a box that also stores recordings, so the
+	 * supervisor trims on every pass.
+	 *
+	 * Safe against the running process: dvblast holds the file O_APPEND, so
+	 * it keeps writing at the new end rather than at a stale offset.
+	 *
+	 * @param int $rID Transponder id.
+	 * @return void
+	 */
+	private static function trimLog($rID) {
+		$rPath = self::logPath($rID);
+
+		if (!is_file($rPath) || (int) @filesize($rPath) < self::LOG_CAP) {
+			return;
+		}
+
+		$rTail = (string) @shell_exec('tail -c 65536 ' . escapeshellarg($rPath));
+
+		@file_put_contents($rPath, $rTail);
+	}
+
 	private static function ensureWorkDir() {
 		$rPath   = self::workDir();
 		$rParent = dirname(rtrim($rPath, '/'));

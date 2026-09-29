@@ -198,8 +198,24 @@ class DvbAdapterService {
 		if (!empty($rTransponder['adapter_id'])) {
 			$rPinned = self::find((int) $rTransponder['adapter_id']);
 
-			if ($rPinned !== null) {
+			// A pin is a preference, not a reservation. Handing back a tuner
+			// another transponder is already streaming on just moves the
+			// failure downstream, where it surfaces as "Device or resource
+			// busy" from whichever tool opens it next and reads like a
+			// hardware fault instead of a scheduling one.
+			$rHeldByOther = $rPinned !== null
+				&& !empty($rPinned['in_use_by'])
+				&& (int) $rPinned['in_use_by'] !== (int) $rTransponder['id'];
+
+			if ($rPinned !== null && !$rHeldByOther) {
 				return $rPinned;
+			}
+
+			// Deliberately not falling through to any free tuner: the pin
+			// usually means that port is cabled to a particular dish, and
+			// quietly tuning a different one would scan the wrong satellite.
+			if ($rHeldByOther) {
+				return null;
 			}
 		}
 
