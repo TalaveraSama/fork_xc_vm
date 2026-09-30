@@ -159,6 +159,9 @@ class DvbModule extends BaseModule {
 		$router->api('dvb_stream', [DvbController::class, 'apiStream'], [
 			'permission' => ['adv', 'streams'],
 		]);
+		$router->api('dvb_stop_all', [DvbController::class, 'apiStopAll'], [
+			'permission' => ['adv', 'streams'],
+		]);
 		$router->api('dvb_camd', [DvbController::class, 'apiCamd'], [
 			'permission' => ['adv', 'streams'],
 		]);

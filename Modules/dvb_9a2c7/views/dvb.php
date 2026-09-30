@@ -106,6 +106,10 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 									<button type="button" class="btn btn-primary mb-2" onclick="dvbDiscover();">
 										<i class="mdi mdi-magnify mr-1"></i>Discover adapters
 									</button>
+									<button type="button" class="btn btn-danger ml-1" onclick="dvbStopAll();"
+										title="Stops every carrier on this node and kills anything of ours still holding a tuner. Use when a frontend is stuck as busy.">
+										<i class="mdi mdi-stop-circle-outline mr-1"></i>Stop everything
+									</button>
 								</div>
 							</div>
 						</div>
@@ -527,6 +531,25 @@ renderUnifiedLayoutFooter('admin');
 	}
 
 	$(function() { setTimeout(dvbBars, 3000); });
+	// A tuner left busy by a lost pid file cannot be recovered from the normal
+	// stop, which only marks the row and waits for cron. This is the blunt
+	// version: mark everything stopped, then signal anything still running out
+	// of our work directory.
+	function dvbStopAll() {
+		new jBox('Confirm', {
+			confirmButton: 'Stop everything',
+			cancelButton: 'Cancel',
+			content: 'Stop every transponder on this node and kill any process still holding a tuner?',
+			confirm: function() {
+				$.post('./api?action=dvb_stop_all', {}, function(rData) {
+					dvbNotify(rData.note || rData.error, rData.result ? 'success' : 'error');
+					setTimeout(function() { location.reload(); }, 1500);
+				}, 'json').fail(function(rXHR) {
+					dvbNotify('Request failed (' + rXHR.status + ').', 'error');
+				});
+			}
+		}).open();
+	}
 </script>
 <script src="assets/js/listings.js"></script>
 </body>

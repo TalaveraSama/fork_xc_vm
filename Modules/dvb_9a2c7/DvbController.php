@@ -11,6 +11,7 @@ use XcVm\Module\Dvb\Service\DvbImportService;
 use XcVm\Module\Dvb\Service\DvbJobService;
 use XcVm\Module\Dvb\Service\DvbScanService;
 use XcVm\Module\Dvb\Service\DvbServiceCatalog;
+use XcVm\Module\Dvb\Service\DvbStreamRunner;
 use XcVm\Module\Dvb\Service\DvbTransponderService;
 
 /**
@@ -545,6 +546,34 @@ class DvbController {
 	 *
 	 * @return void
 	 */
+	/**
+	 * Stop every carrier on this node and reap whatever is left behind.
+	 *
+	 * Deliberately synchronous. The per-transponder stop marks the row and
+	 * lets cron:dvb reconcile within the minute, which is fine for routine
+	 * use and useless when a tuner is stuck and somebody needs it back now.
+	 *
+	 * @return void
+	 */
+	public function apiStopAll() {
+		$rStopped = 0;
+
+		foreach (DvbTransponderService::all() as $rTransponder) {
+			DvbTransponderService::setStreaming((int) $rTransponder['id'], false);
+			DvbStreamRunner::stop($rTransponder);
+			$rStopped++;
+		}
+
+		$rKilled = DvbStreamRunner::killOrphans();
+
+		$this->json([
+			'result' => true,
+			'note'   => 'Stopped ' . $rStopped . ' transponder(s) and signalled '
+				. $rKilled . ' process(es) still holding a tuner. Decryptors go'
+				. ' down with them on the next cron tick.',
+		]);
+	}
+
 	public function apiStream() {
 		$rID          = (int) $this->input('id', 0);
 		$rTransponder = DvbTransponderService::find($rID);

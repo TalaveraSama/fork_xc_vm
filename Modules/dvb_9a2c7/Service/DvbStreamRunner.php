@@ -152,6 +152,34 @@ class DvbStreamRunner {
 	 * @param array $rTransponder Row from `dvb_transponders`.
 	 * @return array{status:bool,message:string}
 	 */
+	/**
+	 * Kill anything of ours still holding a tuner.
+	 *
+	 * The ordinary stop path goes through the pid files, which is correct
+	 * right up until a pid file is lost — a crash, a manual kill, an update
+	 * landing mid-run — and then a dvblast keeps a frontend open that nothing
+	 * will ever reclaim. Every process this module starts carries its work
+	 * directory on the command line, so that string identifies ours exactly
+	 * and cannot match an unrelated dvblast the operator runs themselves.
+	 *
+	 * @return int Processes signalled.
+	 */
+	public static function killOrphans() {
+		$rDir = rtrim(self::workDir(), '/');
+
+		if ($rDir === '') {
+			return 0;
+		}
+
+		$rBefore = (int) trim((string) @shell_exec('pgrep -c -f ' . escapeshellarg($rDir) . ' 2>/dev/null'));
+
+		@shell_exec('pkill -f ' . escapeshellarg($rDir) . ' 2>/dev/null');
+		sleep(1);
+		@shell_exec('pkill -9 -f ' . escapeshellarg($rDir) . ' 2>/dev/null');
+
+		return $rBefore;
+	}
+
 	public static function stop(array $rTransponder) {
 		$rID  = (int) $rTransponder['id'];
 		$rPid = self::readPid($rID);

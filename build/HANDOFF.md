@@ -2126,3 +2126,35 @@ fast as version numbers suggest. Pruning old `base-*` releases is worth doing.
 
 After updating, clear the cached release list, since it holds the truncated
 one for 1800 seconds: `rm -f /home/xc_vm/tmp/gitapi_*`.
+
+## 2.7.4 — Stop everything, and reaping orphans
+
+The per-transponder stop marks `streaming = 0` and lets `cron:dvb` reconcile
+within the minute. That is right for routine use and useless in the situation
+that kept recurring here: a dvblast whose pid file was lost — to a crash, a
+manual kill, an update landing mid-run — keeps a frontend open and nothing
+will ever reclaim it. The panel then reports the carrier as off while the
+signal meter says the frontend is busy, which is exactly the contradiction
+seen on this node.
+
+`DvbStreamRunner::killOrphans()` signals anything whose command line contains
+this module's work directory, TERM then KILL. Every process the module starts
+carries that path in its arguments, so the match is precise and cannot hit an
+unrelated dvblast an operator runs by hand.
+
+`apiStopAll()` marks every transponder stopped, stops each through the normal
+path, then reaps. It is synchronous, because the point of pressing it is to
+get a tuner back now. Exposed as `dvb_stop_all` and wired to a red **Stop
+everything** button next to Discover adapters, behind a jBox confirmation.
+
+Decryptors are not killed directly: they come down on the next cron tick once
+their transponder is no longer streaming, and their pid files are in the same
+work directory so the reaper catches any that are left.
+
+## Release hygiene, with the numbers
+
+Thirty-two old `base-*` releases were deleted with the operator's approval.
+Worth recording honestly: it was **not** enough on its own. Thirty-nine
+releases remain and `binaries-29062026` still sits at index 35, past the
+default page of 30. The pagination fix in 2.7.3 is what makes the lookup work;
+the cleanup only buys headroom and a faster API call.
