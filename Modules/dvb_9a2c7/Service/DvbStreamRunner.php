@@ -123,6 +123,11 @@ class DvbStreamRunner {
 		$rCommand = self::buildCommand($rBinary, $rTransponder, $rAdapter, $rPath, $rServices);
 		$rLog     = self::logPath($rID);
 
+		// Start this run's log clean. The handle is opened in append mode, so
+		// without this the tail read after a failed start shows the previous
+		// run's output and gets reported as the reason this one died.
+		@file_put_contents($rLog, '');
+
 		// setsid detaches the process group so it survives this cron run.
 		@shell_exec('setsid ' . $rCommand . ' >> ' . escapeshellarg($rLog) . ' 2>&1 & echo $! > ' . escapeshellarg(self::pidPath($rID)));
 
@@ -611,7 +616,29 @@ class DvbStreamRunner {
 			return 'DVBlast tuned but never locked. The settings that scan fine may still be wrong for streaming if the LNB is not universal.';
 		}
 
-		return 'DVBlast exited immediately. Last log lines: ' . trim(substr($rLog, -400));
+		// "couldn't writev ... (Connection refused)" is what DVBlast says for
+		// every packet sent to a port with no reader. It is noise on a carrier
+		// whose decryptors are not up yet, never a cause of death, and quoting
+		// it back as the reason sends people hunting the wrong thing.
+		$rMeaningful = [];
+
+		foreach (explode("\n", $rLog) as $rLine) {
+			if (trim($rLine) === '' || stripos($rLine, "couldn't writev") !== false) {
+				continue;
+			}
+
+			$rMeaningful[] = trim($rLine);
+		}
+
+		if (empty($rMeaningful)) {
+			return 'DVBlast exited immediately and said nothing beyond the usual'
+				. ' "connection refused" noise from ports with no reader yet.'
+				. ' Check that the tuner is free (Stop everything, then start again)'
+				. ' and that the transponder settings are the ones that scanned.';
+		}
+
+		return 'DVBlast exited immediately. Last log lines: '
+			. trim(substr(implode(' | ', $rMeaningful), -400));
 	}
 
 	/**

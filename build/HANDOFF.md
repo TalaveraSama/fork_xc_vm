@@ -2224,3 +2224,30 @@ Schema gains `dvb_transponders.scan_nit` with `migrations/1.6.0.sql`.
 A note left in `buildCommand()` for whoever reads it next: dvbv5-scan has no
 `-t`. That line once read `-t 2`, copied from dvbv5-zap where `-t` is
 `--timeout`, and the tool rejected the entire command line without saying so.
+
+## 2.7.7 — the failure message was quoting the previous run
+
+The transponder reported:
+
+    DVBlast exited immediately. Last log lines: (Connection refused) error:
+    couldn't writev to 127.0.0.1:10023 (Connection refused) ...
+
+Both halves of that are wrong in the same way. DVBlast's log handle is opened
+in append mode, so after a failed start the tail belongs to whatever ran
+before, not to the attempt that just died. And `couldn't writev ...
+(Connection refused)` is what DVBlast emits for every packet sent to a port
+with no reader — constant background noise on a carrier whose decryptors are
+not up, never a cause of death.
+
+So the panel presented stale noise as a diagnosis, which is precisely the
+failure mode this module has been audited for all session, arriving through a
+path nobody had looked at.
+
+`start()` now truncates the log before launching, so the tail can only contain
+this attempt. The explanation filters `couldn't writev` lines out, and when
+nothing else remains says so plainly and points at the two things worth
+checking — a tuner still held, and settings that differ from the ones that
+scanned — rather than inventing a cause.
+
+The rule, stated once more because it keeps recurring: a message assembled
+from a log must be sure the log belongs to the event being explained.
