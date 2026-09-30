@@ -2004,3 +2004,28 @@ a bad release — this one was fine and the verifier was wrong, which is why the
 first move was to re-run it rather than to pull the release. And the `base-*`
 releases double the count, so the page boundary arrives twice as fast as the
 version numbers suggest.
+
+## 2.6.9 — signal bars that stay on screen
+
+Two bars per transponder in the list, strength and quality, replacing the
+single percentage badge. Strength and quality fail for different reasons — a
+misaimed dish drops strength, a marginal carrier drops quality — and someone
+adjusting an antenna needs to watch both.
+
+The interesting half is that they now update while the carrier is on air.
+`measureSignal()` used to refuse outright when `streaming` was set, on the
+grounds that the meter and dvblast would fight over the tuner. That is true of
+`dvbv5-zap`, which tunes. It is not true of `dvb-fe-tool --femon`, which the
+manual describes as monitoring "a frontend that is already being streamed via
+some other application" and which "opens the frontend on read-only mode". Its
+output is the same format `parseSignal()` already reads.
+
+So `measureSignal()` now branches: streaming carriers go through
+`monitorSignal()` and `--femon`, idle ones keep the `dvbv5-zap` path. The
+controller's refusal is gone.
+
+The list refreshes only rows marked `data-live="1"`, which are the streaming
+ones, and walks them one at a time with `.always()` chaining so a slow node
+cannot pile requests up. Idle carriers keep showing their last stored reading
+rather than being tuned behind the operator's back, which would claim a tuner
+nobody asked to use.

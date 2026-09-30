@@ -170,13 +170,26 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 												<small><?php echo htmlspecialchars((string) ($rServers[(int) $rRow['server_id']]['server_name'] ?? ('#' . (int) $rRow['server_id'])), ENT_QUOTES); ?></small>
 											</td>
 											<td class="text-center">
-												<?php if ($rRow['signal_strength'] !== null): ?>
-													<span class="badge badge-<?php echo ((int) $rRow['signal_strength'] >= 50) ? 'success' : 'warning'; ?>">
-														<?php echo (int) $rRow['signal_strength']; ?>%
-													</span>
-												<?php else: ?>
-													<span class="text-muted">&mdash;</span>
-												<?php endif; ?>
+												<?php // Two bars beat one number: strength and quality fail for
+												// different reasons, and someone aiming a dish needs to watch both
+												// move. Refreshed in place by dvbBars(). ?>
+												<div class="dvb-bars" data-id="<?php echo (int) $rRow['id']; ?>"
+												data-live="<?php echo !empty($rRow['streaming']) ? 1 : 0; ?>"
+												style="min-width:130px;">
+													<?php foreach ([['s', 'signal_strength', 'S'], ['q', 'signal_quality', 'Q']] as $rBar): ?>
+														<?php $rVal = $rRow[$rBar[1]]; ?>
+														<div class="d-flex align-items-center mb-1">
+															<small class="text-muted mr-1" style="width:10px;"><?php echo $rBar[2]; ?></small>
+															<div class="progress flex-grow-1" style="height:8px;">
+																<div class="progress-bar dvb-bar-<?php echo $rBar[0]; ?>" role="progressbar"
+																	style="width:<?php echo $rVal === null ? 0 : (int) $rVal; ?>%;"></div>
+															</div>
+															<small class="ml-1 dvb-val-<?php echo $rBar[0]; ?>" style="width:36px;">
+																<?php echo $rVal === null ? '&mdash;' : ((int) $rVal . '%'); ?>
+															</small>
+														</div>
+													<?php endforeach; ?>
+												</div>
 											</td>
 											<td class="text-center">
 												<?php if ((int) $rRow['service_count'] > 0): ?>
@@ -470,6 +483,53 @@ renderUnifiedLayoutFooter('admin');
 			dvbNotify('Request failed (' + rXHR.status + '). Check the browser console and the panel log.', 'error');
 		});
 	}
+	// Keep the list's bars alive for carriers that are on air. Those can be
+	// read with dvb-fe-tool --femon, which opens the frontend read-only and
+	// cannot disturb the running dvblast. Carriers that are off are left
+	// showing their last stored reading: measuring one means tuning it, and
+	// doing that behind the operator's back would claim a tuner they did not
+	// ask to use.
+	//
+	// One at a time, never overlapping, so a slow node cannot pile requests up.
+	function dvbBars() {
+		var rLive = $('.dvb-bars[data-live="1"]');
+
+		if (rLive.length === 0) {
+			return;
+		}
+
+		var rIndex = 0;
+
+		function step() {
+			if (rIndex >= rLive.length) {
+				setTimeout(dvbBars, 15000);
+				return;
+			}
+
+			var rBox = $(rLive[rIndex++]);
+
+			$.post('./api?action=dvb_signal', { id: rBox.data('id') }, function(rData) {
+				if (rData && rData.result && rData.signal) {
+					var rS = rData.signal.strength;
+					var rQ = rData.signal.quality;
+
+					if (rS !== null && rS !== undefined) {
+						rBox.find('.dvb-bar-s').css('width', rS + '%');
+						rBox.find('.dvb-val-s').text(rS + '%');
+					}
+
+					if (rQ !== null && rQ !== undefined) {
+						rBox.find('.dvb-bar-q').css('width', rQ + '%');
+						rBox.find('.dvb-val-q').text(rQ + '%');
+					}
+				}
+			}, 'json').always(step);
+		}
+
+		step();
+	}
+
+	$(function() { setTimeout(dvbBars, 2000); });
 </script>
 <script src="assets/js/listings.js"></script>
 </body>

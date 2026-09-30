@@ -261,16 +261,6 @@ class DvbController {
 			]);
 		}
 
-		if (!empty($rTransponder['streaming'])) {
-			// pick() hands back the adapter this transponder already holds, so
-			// measuring a live transponder would fight dvblast for the same
-			// frontend. Refuse instead of disturbing channels that are on air.
-			$this->json([
-				'result' => false,
-				'error'  => 'This transponder is streaming. Stop it before measuring, otherwise the meter and the running stream fight over the same tuner.',
-			]);
-		}
-
 		$rAdapter = DvbAdapterService::pick($rTransponder);
 
 		if ($rAdapter === null) {

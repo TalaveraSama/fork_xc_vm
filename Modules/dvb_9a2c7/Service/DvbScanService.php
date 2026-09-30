@@ -129,10 +129,64 @@ class DvbScanService {
 	 * @param array $rAdapter     Row from `dvb_adapters`.
 	 * @return array{status:bool,error:string,signal:array,log:string}
 	 */
+	/**
+	 * Read the demodulator without touching the tuning.
+	 *
+	 * Used while the carrier is on air. dvb-fe-tool --femon opens the frontend
+	 * read-only, so it cannot disturb the running dvblast, and prints one
+	 * statistics line per second in the same shape dvbv5-zap uses.
+	 *
+	 * @param array $rTransponder Transponder row.
+	 * @param array $rAdapter     Adapter row.
+	 * @return array{status:bool,error:string,signal:array,log:string}
+	 */
+	private static function monitorSignal(array $rTransponder, array $rAdapter): array {
+		$rTool = self::locateBinary('dvb-fe-tool');
+
+		if ($rTool === null) {
+			return [
+				'status' => false,
+				'error'  => 'dvb-fe-tool not found on this node, so a carrier that is on air cannot be measured without interrupting it. Install dvb-tools.',
+				'signal' => [],
+				'log'    => '',
+			];
+		}
+
+		$rCommand = escapeshellarg($rTool)
+			. ' -m'
+			. ' -a ' . (int) ($rAdapter['adapter_num'] ?? 0)
+			. ' -f ' . (int) ($rAdapter['frontend_num'] ?? 0);
+
+		// --femon never returns on its own, so the timeout is the run length.
+		$rLog = (string) @shell_exec('timeout -k 1 ' . (self::SIGNAL_SECONDS + 1) . ' ' . $rCommand . ' 2>&1');
+		$rSignal = self::parseSignal($rLog);
+
+		if (!$rSignal['locked'] && $rSignal['strength'] === null && $rSignal['quality'] === null) {
+			return [
+				'status' => false,
+				'error'  => 'The frontend is streaming but reported no statistics. Some drivers only expose them to the process that tuned.',
+				'signal' => [],
+				'log'    => $rLog,
+			];
+		}
+
+		return ['status' => true, 'error' => '', 'signal' => $rSignal, 'log' => $rLog];
+	}
+
 	public static function measureSignal(array $rTransponder, array $rAdapter): array {
 		$rFail = function ($rError, $rLog = '') {
 			return ['status' => false, 'error' => $rError, 'signal' => [], 'log' => $rLog];
 		};
+
+		// A streaming carrier can still be measured, just not by tuning it
+		// again. dvb-fe-tool --femon exists for this: it "monitors the frontend
+		// locking status and the available statistics for a frontend that is
+		// already being streamed via some other application" and "opens the
+		// frontend on read-only mode". Its output is the same format
+		// parseSignal() already reads, so nothing downstream changes.
+		if (!empty($rTransponder['streaming'])) {
+			return self::monitorSignal($rTransponder, $rAdapter);
+		}
 
 		$rZap = self::locateBinary('dvbv5-zap');
 
