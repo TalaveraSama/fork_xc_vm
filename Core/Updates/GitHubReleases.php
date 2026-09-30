@@ -211,9 +211,32 @@ class GitHubReleases {
             }
         }
 
-        $data = json_decode($this->makeRequest($this->api_url), true);
-        if (!is_array($data)) {
-            throw new \Exception("Failed to parse API response: " . json_last_error_msg());
+        // Page through the list. GitHub returns 30 releases per request and
+        // this repository passed that long ago, which pushed the
+        // `binaries-*` mirror onto page two. getBinariesTag() then failed to
+        // find it, fell back to the newest stable tag, and the binaries
+        // updater kept re-signalling `update_binaries` because the release it
+        // was pointed at carries no binaries -- once a minute, restarting
+        // nginx each time and taking the panel down with it.
+        $data = [];
+        $sep  = (strpos($this->api_url, '?') === false) ? '?' : '&';
+
+        for ($page = 1; $page <= 20; $page++) {
+            $chunk = json_decode($this->makeRequest($this->api_url . $sep . 'per_page=100&page=' . $page), true);
+
+            if (!is_array($chunk)) {
+                throw new \Exception("Failed to parse API response: " . json_last_error_msg());
+            }
+
+            if (empty($chunk)) {
+                break;
+            }
+
+            $data = array_merge($data, $chunk);
+
+            if (count($chunk) < 100) {
+                break;
+            }
         }
 
         $this->saveCache($data);

@@ -2091,3 +2091,38 @@ Default flipped to off, in the schema and in the form, with the reasoning on
 the field. It is worth turning on only while diagnosing, where a black channel
 is easier to read than scrambled noise — which is what the old help text said,
 and it was advice for the wrong situation.
+
+## 2.7.3 — the binaries reinstall loop, caused by this session's release count
+
+The panel logged `BINARIES  Updating XC_VM binaries from XC_VM server...` once
+a minute, 150+ times. Each entry runs `console.php binaries`, which reinstalls
+the runtime and restarts nginx, which is why the nginx log showed a fresh
+master every sixty seconds, workers exiting on SIGABRT, and the panel throwing
+502 constantly. One fault, not four, and nothing to do with the DVB module or
+with load: the node was idle at 1.83 with 13 GB free.
+
+`GitHubReleases::getRawReleases()` fetched
+`https://api.github.com/repos/{owner}/{repo}/releases` with no `per_page` and
+no paging. GitHub returns 30. `getBinariesTag()` scans that list for a
+`binaries-*` tag, and measured live:
+
+    1 page   : 30 releases -> binaries NOT FOUND
+    paginated: 69 releases -> binaries-29062026
+
+Not finding it, `getBinariesTag()` falls back to the newest stable tag, whose
+release carries no binaries, so the updater signals `update_binaries` again on
+the next tick. Forever.
+
+This was self-inflicted. Cutting roughly thirty releases in one session, each
+with its `base-*` companion, pushed a mirror published on 28 September from
+index 0 to index 30 — the first item of page two. `verify-release.py` hit the
+identical bug earlier the same day and was fixed in isolation instead of the
+lesson being applied to every `/releases` reader in the tree.
+
+Two rules worth keeping. **Every GitHub list endpoint must page**, and when
+one such bug is found, grep for the rest of them. And **release count is a
+resource**: `base-*` releases double it, so the page boundary arrives twice as
+fast as version numbers suggest. Pruning old `base-*` releases is worth doing.
+
+After updating, clear the cached release list, since it holds the truncated
+one for 1800 seconds: `rm -f /home/xc_vm/tmp/gitapi_*`.
