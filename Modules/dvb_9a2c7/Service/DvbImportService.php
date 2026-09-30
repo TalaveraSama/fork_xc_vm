@@ -127,7 +127,10 @@ class DvbImportService {
 				continue;
 			}
 
-			self::attachServer($rStreamID, (int) $rTransponder['server_id']);
+			if (!self::attachServer($rStreamID, (int) $rTransponder['server_id'])) {
+				$rErrors[] = 'Created "' . $rService['name'] . '" but could not attach it to server '
+					. (int) $rTransponder['server_id'] . '. The channel will show "No Server Selected".';
+			}
 
 			self::db()->query(
 				'UPDATE `dvb_services`
@@ -439,11 +442,41 @@ class DvbImportService {
 	 * @return void
 	 */
 	private static function attachServer($rStreamID, $rServerID) {
-		self::db()->query(
-			'INSERT IGNORE INTO `streams_servers`(`stream_id`, `server_id`, `parent_id`, `on_demand`) VALUES(?, ?, 0, 0);',
+		// Mirror ChannelService's own insert, column for column. Ours omitted
+		// pids_create_channel and cchannel_rsources, and the INSERT IGNORE
+		// then swallowed whatever the database said about it: the row was
+		// never created, the list showed "No Server Selected", and opening the
+		// stream and pressing Save fixed it because that path goes through
+		// ChannelService and inserts the full set.
+		//
+		// IGNORE is gone with it. A duplicate is prevented by checking first,
+		// so the only thing IGNORE was still hiding was real failure.
+		$db = self::db();
+
+		$db->query(
+			'SELECT `id` FROM `streams_servers` WHERE `stream_id` = ? AND `server_id` = ? LIMIT 1;',
 			(int) $rStreamID,
 			(int) $rServerID
 		);
+
+		if ($db->num_rows() > 0) {
+			return true;
+		}
+
+		$db->query(
+			'INSERT INTO `streams_servers`(`stream_id`, `server_id`, `parent_id`, `on_demand`, `pids_create_channel`, `cchannel_rsources`)
+			 VALUES(?, ?, 0, 0, \'[]\', \'[]\');',
+			(int) $rStreamID,
+			(int) $rServerID
+		);
+
+		$db->query(
+			'SELECT `id` FROM `streams_servers` WHERE `stream_id` = ? AND `server_id` = ? LIMIT 1;',
+			(int) $rStreamID,
+			(int) $rServerID
+		);
+
+		return $db->num_rows() > 0;
 	}
 
 	/**
