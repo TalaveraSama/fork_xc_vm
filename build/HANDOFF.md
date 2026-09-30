@@ -2280,3 +2280,30 @@ always carries the literal string and therefore matches both the plain and
 the bracketed pattern. The reasoning above stands on the regex, not on a
 green test, and that distinction is worth remembering rather than papering
 over.
+
+## 2.7.9 — an error that outlived its cause
+
+After a reboot brought everything up cleanly, the transponder still showed a
+red error badge quoting a failure from the previous night. The signal bars
+beside it read 70% and 60%, and those come from `--femon`, which can only
+report on a frontend that is already tuned. So dvblast was running, the
+carrier was fine, and the panel was describing something that had stopped
+being true hours earlier.
+
+`supervise()` has a branch for a transponder whose process is already alive.
+It touched `stream_checked` and moved on, and nothing else ever revisited
+`stream_status`. A carrier that failed once therefore kept its error badge and
+message permanently, no matter how well it ran afterwards.
+
+It now records `running` and a fresh message whenever it finds a live process
+whose stored status disagrees.
+
+This is the same fault as the one 2.7.7 fixed at the other end: a message
+assembled correctly at the time, and then shown long after the event it
+described. Worth generalising into the standing rule already in this file —
+a status that is only ever written on failure will be wrong for as long as the
+thing keeps working.
+
+Verification note: `DvbServiceCatalog::` needed no `use` here, since
+`DvbStreamRunner` shares its namespace, which is why the file carries a single
+import for `ProcessManager` from elsewhere. Checked rather than assumed.

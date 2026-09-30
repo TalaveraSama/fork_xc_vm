@@ -267,6 +267,17 @@ class DvbStreamRunner {
 			if (self::isRunning($rID)) {
 				// Touch the heartbeat so the UI can tell "running" from
 				// "nobody has looked at this since the node rebooted".
+				//
+				// And clear any stale failure while we are here. A carrier
+				// that failed once kept its error badge and message for ever,
+				// because this branch only ever updated the heartbeat: the
+				// panel went on reporting a diagnosis from an attempt that had
+				// long since been superseded by a working one. An error that
+				// outlives its cause is worse than no error at all.
+				if ((string) ($rTransponder['stream_status'] ?? '') !== 'running') {
+					self::record($rID, 'running', 'Streaming ' . count(self::servicesFor($rID)) . ' service(s).');
+				}
+
 				$db->query('UPDATE `dvb_transponders` SET `stream_checked` = ? WHERE `id` = ?;', time(), $rID);
 				continue;
 			}
@@ -681,6 +692,16 @@ class DvbStreamRunner {
 	 * @param int $rID Transponder id.
 	 * @return void
 	 */
+	/**
+	 * Services this transponder streams, for status text only.
+	 *
+	 * @param int $rID Transponder id.
+	 * @return array
+	 */
+	private static function servicesFor($rID) {
+		return DvbServiceCatalog::forTransponder((int) $rID);
+	}
+
 	private static function trimLog($rID) {
 		$rPath = self::logPath($rID);
 
