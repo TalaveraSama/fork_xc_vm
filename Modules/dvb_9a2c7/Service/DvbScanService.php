@@ -523,7 +523,8 @@ class DvbScanService {
 	 * owns the directory and what mode it carries turns the same failure into
 	 * an instruction. Shared by both runners so the wording cannot drift.
 	 *
-	 * @param string $rPath Directory being written to.
+	 * @param string      $rPath   Directory being written to.
+	 * @param string|null $rTarget Specific file, when one is known.
 	 * @return string
 	 */
 	/**
@@ -551,7 +552,7 @@ class DvbScanService {
 		return '[' . substr($rLiteral, 0, 1) . ']' . substr($rLiteral, 1);
 	}
 
-	public static function describePath($rPath) {
+	public static function describePath($rPath, $rTarget = null) {
 		$rUser = 'unknown';
 
 		if (function_exists('posix_geteuid')) {
@@ -576,10 +577,36 @@ class DvbScanService {
 			$rOwner = !empty($rInfo['name']) ? (string) $rInfo['name'] : $rOwner;
 		}
 
-		return 'Running as "' . $rUser . '". ' . $rPath . ' is owned by "' . $rOwner
+		$rOut = 'Running as "' . $rUser . '". ' . $rPath . ' is owned by "' . $rOwner
 			. '", mode ' . substr(sprintf('%o', (int) @fileperms($rPath)), -4)
-			. ', and is ' . (is_writable($rPath) ? 'writable' : 'NOT writable by this user')
-			. '. Fix with: chown -R xc_vm:xc_vm ' . $rPath;
+			. ', and is ' . (is_writable($rPath) ? 'writable' : 'NOT writable by this user') . '.';
+
+		// A writable directory is not the whole story. An existing file left
+		// behind by a run under another user cannot be overwritten even when
+		// the directory allows it, and saying "the directory is writable" and
+		// then suggesting a chown of that directory is a contradiction that
+		// sends people chasing permissions that are already correct.
+		if ($rTarget !== null && file_exists($rTarget)) {
+			$rTOwner = (string) @fileowner($rTarget);
+
+			if (function_exists('posix_getpwuid')) {
+				$rTInfo  = @posix_getpwuid((int) @fileowner($rTarget));
+				$rTOwner = !empty($rTInfo['name']) ? (string) $rTInfo['name'] : $rTOwner;
+			}
+
+			$rOut .= ' The file ' . $rTarget . ' already exists, owned by "' . $rTOwner
+				. '", mode ' . substr(sprintf('%o', (int) @fileperms($rTarget)), -4)
+				. ', and is ' . (is_writable($rTarget) ? 'writable' : 'NOT writable by this user')
+				. '. That is what blocks the write when the directory itself is fine.';
+		}
+
+		$rFree = @disk_free_space($rPath);
+
+		if ($rFree !== false && $rFree < 10485760) {
+			$rOut .= ' Only ' . round($rFree / 1048576, 1) . ' MB free on that filesystem.';
+		}
+
+		return $rOut . ' Fix with: rm -f ' . ($rTarget ?? ($rPath . '/*')) . ' && chown -R xc_vm:xc_vm ' . $rPath;
 	}
 
 	public static function parseSignal($rLog) {

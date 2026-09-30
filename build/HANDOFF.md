@@ -2307,3 +2307,36 @@ thing keeps working.
 Verification note: `DvbServiceCatalog::` needed no `use` here, since
 `DvbStreamRunner` shares its namespace, which is why the file carries a single
 import for `ProcessManager` from elsewhere. Checked rather than assumed.
+
+## 2.7.10 — a diagnostic that contradicted itself
+
+Transponder 6 reported:
+
+    Could not write the DVBlast config to /home/xc_vm/tmp/cache/dvb/tp6.conf.
+    Running as "xc_vm". /home/xc_vm/tmp/cache/dvb is owned by "xc_vm", mode
+    0755, and is writable. Fix with: chown -R xc_vm:xc_vm ...
+
+It states the directory is writable and then prescribes a chown of that same
+directory. Both halves cannot be useful at once, and the operator is sent to
+check permissions that are already right.
+
+The message was looking at the wrong object. A writable directory allows a
+file to be created or removed; it does not allow an *existing* file owned by
+someone else to be overwritten. These runners spent part of this session
+executing as root before moving to `xc_vm`, and root-owned `tpN.conf` files
+were left behind. Reproduced directly: directory writable, file mode 0444,
+`file_put_contents` fails, unlink and recreate succeeds.
+
+Two changes. `describePath()` takes an optional target file and reports its
+owner, mode and writability when it exists, naming that as the blocker rather
+than the directory; it also mentions free space when under 10 MB, since a full
+filesystem produces the same failure with entirely different permissions.
+
+And `start()` no longer just reports it. When the write fails it unlinks the
+file and tries once more, which is safe because the config is regenerated
+from the database on every start and holds nothing that is not already there.
+It only reports if the second attempt fails too.
+
+Standing rule, now stated for the fourth time in this file: a diagnostic must
+examine the thing that actually failed. Describing a neighbour of it produces
+confident, well-formatted, wrong advice.

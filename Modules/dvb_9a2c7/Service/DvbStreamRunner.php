@@ -112,12 +112,20 @@ class DvbStreamRunner {
 			return ['status' => false, 'message' => 'Could not write the DVBlast config to ' . $rPath . '. ' . $rWhy];
 		}
 
-		if (file_put_contents($rPath, $rConfig) === false) {
-			return [
-				'status'  => false,
-				'message' => 'Could not write the DVBlast config to ' . $rPath . '. '
-					. DvbScanService::describePath(dirname($rPath)),
-			];
+		if (@file_put_contents($rPath, $rConfig) === false) {
+			// A config left behind by a run under another user blocks the
+			// rewrite even though the directory is ours. Removing it is safe:
+			// it is regenerated from the database on every start, and holds
+			// nothing that is not already there.
+			@unlink($rPath);
+
+			if (@file_put_contents($rPath, $rConfig) === false) {
+				return [
+					'status'  => false,
+					'message' => 'Could not write the DVBlast config to ' . $rPath . '. '
+						. DvbScanService::describePath(dirname($rPath), $rPath),
+				];
+			}
 		}
 
 		$rCommand = self::buildCommand($rBinary, $rTransponder, $rAdapter, $rPath, $rServices);
