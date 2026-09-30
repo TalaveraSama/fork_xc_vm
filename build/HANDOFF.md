@@ -2200,3 +2200,27 @@ Still open: choosing between two audio tracks, which lives in the core stream
 editor rather than this module; an option to follow the NIT while scanning,
 which one operator used to discover six transponders and 196 services in a
 single pass; and a review of the Flussonic module, untouched all session.
+
+## 2.7.6 — the NIT sweep, made a choice instead of a decision
+
+Since 1.2.x the scan has always passed `-F/--file-freqs-only`, which stops
+dvbv5-scan adding every frequency it reads from the NIT to its own work queue.
+The reasoning was sound as far as it went: walking a whole satellite outlasts
+`SCAN_TIMEOUT` and leaves no output file, so the scan appears to fail.
+
+What that reasoning missed is how much it was throwing away. Run by hand, one
+sweep of a single carrier came back with **six transponders and 196 services**
+— against 21 from the same carrier scanned in isolation. Discovering a
+satellite by hand, one transponder at a time, is not work anyone should do
+when the broadcaster is announcing the whole list.
+
+So it is now a per-transponder checkbox, **Sweep the whole satellite (follow
+the NIT)**, off by default. Off keeps the fast single-carrier scan and its
+120-second budget. On drops `-F` and raises the budget to
+`SCAN_TIMEOUT_NIT` = 2400 seconds, which is what a satellite-wide walk needs.
+
+Schema gains `dvb_transponders.scan_nit` with `migrations/1.6.0.sql`.
+
+A note left in `buildCommand()` for whoever reads it next: dvbv5-scan has no
+`-t`. That line once read `-t 2`, copied from dvbv5-zap where `-t` is
+`--timeout`, and the tool rejected the entire command line without saying so.

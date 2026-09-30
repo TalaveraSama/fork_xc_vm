@@ -169,6 +169,21 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 										<?php endforeach; ?>
 									</select>
 								</div>
+								<div class="form-group">
+									<div class="custom-control custom-checkbox">
+										<input type="checkbox" class="custom-control-input" id="tp-scan-nit" name="scan_nit" value="1"
+											<?php echo !empty($rTransponder['scan_nit']) ? 'checked' : ''; ?>>
+										<label class="custom-control-label" for="tp-scan-nit">
+											Sweep the whole satellite (follow the NIT)
+											<small class="text-muted d-block">
+												Off scans only this carrier and takes under a minute. On, the scanner
+												follows every frequency the broadcaster announces and can return the
+												whole satellite from one pass, at the cost of up to forty minutes.
+												Use it once to discover what is up there, then leave it off.
+											</small>
+										</label>
+									</div>
+								</div>
 							</div>
 
 							<div class="form-group">

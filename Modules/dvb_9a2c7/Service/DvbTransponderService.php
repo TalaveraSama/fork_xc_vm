@@ -42,7 +42,7 @@ class DvbTransponderService {
 		'frequency', 'polarization', 'symbol_rate', 'modulation', 'inner_fec',
 		'rolloff', 'pilot', 'bandwidth', 'isi', 'pls_mode', 'pls_code',
 		'lnb_type', 'lnb_low', 'lnb_high', 'lnb_switch', 'diseqc', 'output_host',
-		'enabled',
+		'scan_nit', 'enabled',
 	];
 
 	/**

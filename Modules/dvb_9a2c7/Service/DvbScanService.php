@@ -41,6 +41,9 @@ class DvbScanService {
 	/** Seconds a single-transponder scan is allowed to take before we give up. */
 	private const SCAN_TIMEOUT = 120;
 
+	/** Seconds allowed when the scan follows the NIT across a satellite. */
+	private const SCAN_TIMEOUT_NIT = 2400;
+
 	/** Delivery systems that are satellite, i.e. need LNB and polarization. */
 	private const SATELLITE = ['DVBS', 'DVBS2', 'TURBO', 'ISDBS'];
 
@@ -84,7 +87,7 @@ class DvbScanService {
 
 		// stderr carries the progress log (lock status, service names, provider
 		// names); stdout is usually empty. Both are wanted.
-		@shell_exec('timeout ' . self::SCAN_TIMEOUT . ' ' . $rCommand . ' > ' . escapeshellarg($rLogPath) . ' 2>&1');
+		@shell_exec('timeout ' . (empty($rTransponder['scan_nit']) ? self::SCAN_TIMEOUT : self::SCAN_TIMEOUT_NIT) . ' ' . $rCommand . ' > ' . escapeshellarg($rLogPath) . ' 2>&1');
 
 		$rLog = is_file($rLogPath) ? (string) file_get_contents($rLogPath) : '';
 
@@ -351,17 +354,21 @@ class DvbScanService {
 			'-f ' . (int) ($rA['frontend_num'] ?? 0),
 			'-o ' . escapeshellarg($rOut),
 			'-O DVBV5',
-			// Stay on the transponder the operator asked about. Without this,
-			// dvbv5-scan adds every frequency it learns from the NIT to its
-			// own work queue and walks the whole satellite, which outlasts
-			// SCAN_TIMEOUT and so leaves no output file behind.
-			//
-			// This used to read '-t 2', copied from dvbv5-zap where -t is
-			// --timeout. dvbv5-scan has no -t at all: it rejected the command
-			// line, wrote nothing, and every scan reported "tuner never
-			// locked" while the card was in fact locking perfectly.
-			'-F',
 		];
+
+		// -F/--file-freqs-only keeps the scan on the carrier the operator
+		// asked about. Dropping it lets dvbv5-scan add every frequency it
+		// learns from the NIT to its own queue and walk the whole satellite:
+		// one sweep of a single carrier returned six transponders and 196
+		// services, which is worth the wait when it is asked for, and is why
+		// SCAN_TIMEOUT_NIT replaces SCAN_TIMEOUT in that mode.
+		//
+		// Note for anyone tempted to reach for -t here: dvbv5-scan has no such
+		// option. It used to read '-t 2', copied from dvbv5-zap where -t is
+		// --timeout, and the tool rejected the whole command line in silence.
+		if (empty($rT['scan_nit'])) {
+			$rArgs[] = '-F';
+		}
 
 		if (in_array(strtoupper((string) ($rT['delivery_system'] ?? '')), self::SATELLITE, true)) {
 			$rArgs[] = '-l ' . escapeshellarg(self::lnbName((string) ($rT['lnb_type'] ?? 'UNIVERSAL')));

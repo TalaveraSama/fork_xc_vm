@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS `dvb_transponders` (
   `lnb_high` int(11) NOT NULL DEFAULT 10600000,
   `lnb_switch` int(11) NOT NULL DEFAULT 11700000,
   `diseqc` int(11) NOT NULL DEFAULT 0,
+  `scan_nit` tinyint(1) NOT NULL DEFAULT 0,
   `scan_status` varchar(16) COLLATE utf8_unicode_ci DEFAULT 'never',
   `scan_message` text COLLATE utf8_unicode_ci,
   `last_scan` int(11) DEFAULT NULL,
