@@ -2251,3 +2251,32 @@ scanned — rather than inventing a cause.
 
 The rule, stated once more because it keeps recurring: a message assembled
 from a log must be sure the log belongs to the event being explained.
+
+## 2.7.8 — pgrep and pkill were matching the shell that ran them
+
+`shell_exec` runs `sh -c "<command>"`, and that shell's own command line
+contains the command verbatim. So `pgrep -f '/home/xc_vm/tmp/cache/dvb/...'`
+finds the shell asking the question, and `pkill -f` with the same pattern
+kills its own wrapper.
+
+Two consequences, both introduced by me:
+
+* `killOrphans()` (2.7.4) signalled its own wrapper shell, which is why "Stop
+  everything" and the transponder stop did not reliably kill anything.
+* `isRunning()` (2.7.5) fell back to `pgrep -c -f <log path>` when the pid
+  file was unusable. That always counted the wrapper, so every service looked
+  alive, and `supervise()` never started a decryptor again. It is why
+  `cron:dvb` reported `0 started, 13 stopped`.
+
+`DvbScanService::selfSafePattern()` brackets the first character:
+`/home/...` becomes `[/]home/...`. The regex is unchanged — `[/]` still
+matches one slash — but the literal text now in the shell's command line no
+longer satisfies it, because after the slash comes `]` rather than `h`. Same
+reason `ps | grep [x]yz` is idiomatic. pgrep also excludes itself.
+
+Honest note on verification: this could not be demonstrated in the agent's
+sandbox, which wraps each command in a single `bash -c` whose command line
+always carries the literal string and therefore matches both the plain and
+the bracketed pattern. The reasoning above stands on the regex, not on a
+green test, and that distinction is worth remembering rather than papering
+over.

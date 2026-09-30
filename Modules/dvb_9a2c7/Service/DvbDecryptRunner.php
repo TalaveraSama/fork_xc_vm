@@ -371,7 +371,12 @@ class DvbDecryptRunner {
 			return false;
 		}
 
-		$rFound = (int) trim((string) @shell_exec('pgrep -c -f ' . escapeshellarg($rMarker) . ' 2>/dev/null'));
+		// Must not match the shell that runs it, or this counts itself and
+		// every service looks alive for ever -- which stops supervise()
+		// from ever starting one.
+		$rFound = (int) trim((string) @shell_exec(
+			'pgrep -c -f ' . escapeshellarg(DvbScanService::selfSafePattern($rMarker)) . ' 2>/dev/null'
+		));
 
 		return $rFound > 0;
 	}

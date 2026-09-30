@@ -176,11 +176,16 @@ class DvbStreamRunner {
 			return 0;
 		}
 
-		$rBefore = (int) trim((string) @shell_exec('pgrep -c -f ' . escapeshellarg($rDir) . ' 2>/dev/null'));
+		// Bracketed so the pattern cannot match the shell that carries it.
+		// Without this, pkill kills its own wrapper before reaching the
+		// processes it was aimed at, and pgrep counts that wrapper as a hit.
+		$rPattern = escapeshellarg(DvbScanService::selfSafePattern($rDir));
 
-		@shell_exec('pkill -f ' . escapeshellarg($rDir) . ' 2>/dev/null');
+		$rBefore = (int) trim((string) @shell_exec('pgrep -c -f ' . $rPattern . ' 2>/dev/null'));
+
+		@shell_exec('pkill -f ' . $rPattern . ' 2>/dev/null');
 		sleep(1);
-		@shell_exec('pkill -9 -f ' . escapeshellarg($rDir) . ' 2>/dev/null');
+		@shell_exec('pkill -9 -f ' . $rPattern . ' 2>/dev/null');
 
 		return $rBefore;
 	}

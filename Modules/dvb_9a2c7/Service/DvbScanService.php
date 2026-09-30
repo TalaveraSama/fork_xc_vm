@@ -526,6 +526,31 @@ class DvbScanService {
 	 * @param string $rPath Directory being written to.
 	 * @return string
 	 */
+	/**
+	 * Turn a literal string into a pgrep/pkill pattern that cannot match the
+	 * shell running it.
+	 *
+	 * shell_exec spawns `sh -c "pgrep -f <pattern>"`, and that shell's own
+	 * command line contains the pattern verbatim, so a plain -f match finds
+	 * it. pgrep then always reports at least one hit and pkill kills its own
+	 * wrapper. Bracketing the first character leaves the regex meaning
+	 * unchanged while making the literal text in the command line no longer
+	 * satisfy it -- the standard trick, and the reason `ps | grep [x]yz`
+	 * exists.
+	 *
+	 * @param string $rLiteral Text to look for in a command line.
+	 * @return string Pattern safe to hand to pgrep or pkill.
+	 */
+	public static function selfSafePattern($rLiteral) {
+		$rLiteral = (string) $rLiteral;
+
+		if ($rLiteral === '') {
+			return '';
+		}
+
+		return '[' . substr($rLiteral, 0, 1) . ']' . substr($rLiteral, 1);
+	}
+
 	public static function describePath($rPath) {
 		$rUser = 'unknown';
 
