@@ -2340,3 +2340,35 @@ It only reports if the second attempt fails too.
 Standing rule, now stated for the fourth time in this file: a diagnostic must
 examine the thing that actually failed. Describing a neighbour of it produces
 confident, well-formatted, wrong advice.
+
+## INSTALL.md — what a bare Ubuntu box actually needs
+
+`Modules/dvb_9a2c7/INSTALL.md` documents commissioning the module from
+nothing. Every warning in it is something that went wrong during this
+session's deployment, not a precaution.
+
+The two facts worth knowing without reading it:
+
+**`v4l-utils` is not `dvb-tools`.** `build/install` installs the former on
+every distribution, and on Debian and Ubuntu that package does not contain
+`dvbv5-scan`, `dvbv5-zap` or `dvb-fe-tool`. A normally installed panel
+therefore cannot scan, and `dvblast` is absent too. Both come from
+`install-tuner-node.sh`, which is a separate, manual step.
+
+**`build/install` runs `apt-get autoremove -y`** (line 2000). Installing the
+panel after building the card driver can take `build-essential`, `gcc`, `make`
+and `libssl-dev` with it, because nothing the panel installs depends on them.
+The driver keeps working, having already been compiled, so the damage only
+appears later when tsdecrypt will not build or a kernel upgrade leaves the
+driver unrebuildable. Documented order: panel, then driver, then tuner node.
+
+Also covered: the card driver is entirely outside this repository; the
+adapter-to-input mapping that decides which tuner can see a given
+polarisation and band; why tsdecrypt is vendored rather than cloned (upstream
+submodules point at a single host and `git submodule update` reports success
+while leaving the directories empty); and the two CAMD settings — an explicit
+CAID, and EMM forwarding off — that each cost a day here.
+
+Every claim in the document was checked against the code before committing,
+which is how the tsdecrypt commit hashes turned out to be in
+`vendor/PROVENANCE.txt` rather than where the first draft said.
