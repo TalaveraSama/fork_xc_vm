@@ -156,10 +156,17 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 								</div>
 								<div class="custom-control custom-checkbox mb-1">
 									<input type="checkbox" class="custom-control-input" id="camd-mute" name="mute_on_error" value="1"
-										<?php echo (!isset($rEditing['mute_on_error']) || !empty($rEditing['mute_on_error'])) ? 'checked' : ''; ?>>
+										<?php echo !empty($rEditing['mute_on_error']) ? 'checked' : ''; ?>>
 									<label class="custom-control-label" for="camd-mute">
 										Output nothing without a valid control word
-										<small class="text-muted">&mdash; a black channel is diagnosable, scrambled noise gets blamed on the encoder.</small>
+										<small class="text-danger d-block">
+											Off by default, and leave it off on a line whose answers are patchy.
+											With it on, a missing control word means no output at all, so ffprobe
+											never sees enough to analyse the channel and it sits on STARTING for
+											ever instead of coming up and showing a picture whenever keys arrive.
+											Turn it on only while diagnosing, when a black channel is easier to
+											read than scrambled noise.
+										</small>
 									</label>
 								</div>
 								<div class="custom-control custom-checkbox">

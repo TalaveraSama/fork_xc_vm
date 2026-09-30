@@ -2074,3 +2074,20 @@ plausible source of sustained 502s any more. A panel still returning 502
 constantly while roughly twenty ffmpeg processes, twenty tsdecrypt processes
 and a dvblast share the node is far more likely to be out of CPU, memory or
 PHP-FPM children, and `nginx`'s error log says which in so many words.
+
+## 2.7.2 — "output nothing without a control word" was holding channels down
+
+With EMM forwarding finally off, most channels still sat on STARTING with
+"No information available", and `mute_on_error` is why.
+
+The panel marks a stream on air only once ffprobe can analyse it and fill in
+codec and resolution. tsdecrypt run with `-u` emits nothing at all while it
+has no valid control word, so on a line whose answers are patchy there is
+never enough continuous output to analyse, and the channel never leaves
+STARTING. Without `-u` the stream always flows: ffprobe analyses it, the row
+goes green and stays green, and the picture appears whenever keys arrive.
+
+Default flipped to off, in the schema and in the form, with the reasoning on
+the field. It is worth turning on only while diagnosing, where a black channel
+is easier to read than scrambled noise — which is what the old help text said,
+and it was advice for the wrong situation.
