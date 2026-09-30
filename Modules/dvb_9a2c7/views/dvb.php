@@ -355,7 +355,11 @@ renderUnifiedLayoutFooter('admin');
 			}
 			$('#dvb-meter-detail').text(rBits.join(' \u00b7 '));
 
-			dvbMeterTimer = setTimeout(function() { dvbSignalPoll(rID); }, 1500);
+			// Chained, never on a fixed interval, and unhurried: the request
+			// behind it holds a PHP-FPM worker for about four seconds while
+			// it reads the demodulator, so a tight loop here competes with
+			// the rest of the panel for the pool.
+			dvbMeterTimer = setTimeout(function() { dvbSignalPoll(rID); }, 3000);
 		}, 'json').fail(function(rXHR) {
 			if (rGen !== dvbMeterGen) {
 				return;

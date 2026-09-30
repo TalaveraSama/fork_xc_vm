@@ -2053,3 +2053,24 @@ once for every row every 20 seconds instead of once per row.
 button and is waiting for the answer. The rule worth keeping: **an endpoint
 that shells out must never be put on a timer.** One button press is fine; a
 poll multiplies the cost by every open tab.
+
+## 2.7.1 — plain UDP URLs again, and a slower meter
+
+Reverts the query string 2.6.5 appended to imported sources. It now reads
+`udp://127.0.0.1:10048` again. The operator asked for it: the parameters show
+up verbatim in the stream editor, `buffer_size` is clamped to
+`net.core.rmem_max` regardless, and nobody could measure the benefit. Anyone
+who wants them can add them to an individual stream.
+
+The manual meter's poll goes from 1500 ms to 3000 ms between samples. It was
+already chained inside the success callback rather than on a fixed interval,
+so it never overlapped, but the request behind it holds a PHP-FPM worker for
+about four seconds while it reads the demodulator, and a tight loop there
+competes with the rest of the panel for a small pool.
+
+Worth stating plainly, because it was checked and ruled out: with 2.7.0 the
+list bars read a cached row and the meter is chained, so neither is a
+plausible source of sustained 502s any more. A panel still returning 502
+constantly while roughly twenty ffmpeg processes, twenty tsdecrypt processes
+and a dvblast share the node is far more likely to be out of CPU, memory or
+PHP-FPM children, and `nginx`'s error log says which in so many words.
