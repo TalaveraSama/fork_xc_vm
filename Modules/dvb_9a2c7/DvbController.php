@@ -11,6 +11,7 @@ use XcVm\Module\Dvb\Service\DvbImportService;
 use XcVm\Module\Dvb\Service\DvbJobService;
 use XcVm\Module\Dvb\Service\DvbScanService;
 use XcVm\Module\Dvb\Service\DvbServiceCatalog;
+use XcVm\Module\Dvb\Service\DvbDecryptRunner;
 use XcVm\Module\Dvb\Service\DvbStreamRunner;
 use XcVm\Module\Dvb\Service\DvbTransponderService;
 
@@ -402,6 +403,34 @@ class DvbController {
 	 *
 	 * @return void
 	 */
+	/**
+	 * Read a list of ids however the request happened to encode it.
+	 *
+	 * A multi-select reaches PHP as an array, but the same value can arrive
+	 * as "3", as "3,7", or as a JSON array depending on how the request was
+	 * built and what the input layer does to it on the way in. Casting with
+	 * (array) turns "3,7" into one bogus id of 3 and loses the rest, which is
+	 * how a chosen bouquet silently failed to be applied.
+	 *
+	 * @param mixed $rValue Whatever came in.
+	 * @return int[] Positive ids, deduplicated.
+	 */
+	private static function idList($rValue) {
+		if (is_string($rValue)) {
+			$rTrimmed = trim($rValue);
+			$rDecoded = ($rTrimmed !== '' && $rTrimmed[0] === '[') ? json_decode($rTrimmed, true) : null;
+			$rValue   = is_array($rDecoded) ? $rDecoded : explode(',', $rTrimmed);
+		}
+
+		if (!is_array($rValue)) {
+			$rValue = [$rValue];
+		}
+
+		return array_values(array_unique(array_filter(array_map('intval', $rValue), function ($rID) {
+			return $rID > 0;
+		})));
+	}
+
 	public function apiImport() {
 		$rIDs = $this->input('service_ids', []);
 
@@ -430,7 +459,7 @@ class DvbController {
 
 		$rResult = DvbImportService::import($rIDs, [
 			'category_id'    => (int) $this->input('category_id', 0),
-			'bouquets'       => (array) $this->input('bouquets', []),
+			'bouquets'       => self::idList($this->input('bouquets', [])),
 			'prefix'         => (string) $this->input('prefix', ''),
 			'skip_encrypted' => $rSkip,
 			// Without this the chosen CAMD never reached the importer, so
@@ -444,6 +473,7 @@ class DvbController {
 		$this->json([
 			'result'   => $rResult['status'],
 			'imported' => $rResult['imported'],
+			'bouquets' => $rResult['bouquets'] ?? 0,
 			'skipped'  => $rResult['skipped'],
 			'error'    => implode(' | ', $rResult['errors']),
 			'note'     => $rResult['imported'] > 0
@@ -585,6 +615,21 @@ class DvbController {
 		$rStart = ((string) $this->input('sub', 'start')) !== 'stop';
 
 		DvbTransponderService::setStreaming($rID, $rStart);
+
+		// Stopping happens here and now, not on the next cron tick. Waiting a
+		// minute is fine when starting; it is not fine when the reason for
+		// pressing stop is that a tuner is wedged and something else needs it.
+		// The decryptors come down with the carrier, and killOrphans() catches
+		// anything whose pid file no longer matches a live process.
+		if (!$rStart) {
+			DvbStreamRunner::stop($rTransponder);
+
+			foreach (DvbServiceCatalog::forTransponder($rID) as $rService) {
+				DvbDecryptRunner::stop((int) $rService['id']);
+			}
+
+			DvbStreamRunner::killOrphans();
+		}
 
 		$rJobID = DvbJobService::enqueue(
 			(int) $rTransponder['server_id'],

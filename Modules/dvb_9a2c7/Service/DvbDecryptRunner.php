@@ -352,7 +352,28 @@ class DvbDecryptRunner {
 	public static function isRunning($rServiceID) {
 		$rPid = self::readPid($rServiceID);
 
-		return $rPid > 0 && ProcessManager::isRunning($rPid, 'tsdecrypt');
+		if ($rPid > 0 && ProcessManager::isRunning($rPid, 'tsdecrypt')) {
+			return true;
+		}
+
+		// The pid file is not the only truth. If it was written by a different
+		// user, lost to a crash, or cleaned up by hand, this returns false and
+		// supervise() starts a second tsdecrypt for a service that already has
+		// one -- both then write the same pid file and the first is orphaned
+		// for good. Seen in the field after the runners moved from root to
+		// xc_vm and left root-owned pid files behind.
+		//
+		// Ask the process table instead. The log path is unique per service
+		// and appears verbatim on the command line.
+		$rMarker = self::logPath($rServiceID);
+
+		if ($rMarker === '') {
+			return false;
+		}
+
+		$rFound = (int) trim((string) @shell_exec('pgrep -c -f ' . escapeshellarg($rMarker) . ' 2>/dev/null'));
+
+		return $rFound > 0;
 	}
 
 	/**

@@ -2158,3 +2158,45 @@ Worth recording honestly: it was **not** enough on its own. Thirty-nine
 releases remain and `binaries-29062026` still sits at index 35, past the
 default page of 30. The pagination fix in 2.7.3 is what makes the lookup work;
 the cleanup only buys headroom and a faster API call.
+
+## 2.7.5 — import completes, stop is immediate, no more duplicate decryptors
+
+Four faults reported from real use, three fixed here.
+
+**Channels imported with no server.** `attachServer()` inserted into
+`streams_servers` without `pids_create_channel` or `cchannel_rsources`, which
+`ChannelService` supplies as `'[]'`, and `INSERT IGNORE` swallowed the result.
+The row was never created, the list read "No Server Selected", and opening the
+stream and pressing Save fixed it only because that path goes through
+`ChannelService`. It now mirrors that insert column for column, checks for an
+existing row rather than relying on IGNORE, verifies the row landed, and the
+importer reports an error naming the channel when it did not.
+
+**Bouquet not applied.** The controller did `(array) $this->input('bouquets')`.
+That is right for an array and wrong for everything else: `"3,7"` becomes a
+single bogus id of 3 and the rest is lost. `idList()` now accepts an array, a
+bare id, a comma list or a JSON array, drops non-positive values and
+deduplicates. `import()` counts what it applied, returns the number, and says
+so explicitly when bouquets were chosen and none could be applied.
+
+**Duplicate tsdecrypt.** `isRunning()` trusted the pid file alone. When that
+file was written by another user, lost to a crash or cleaned up by hand, it
+returned false and `supervise()` started a second decryptor for a service that
+already had one; both then wrote the same pid file and the first was orphaned
+permanently. Observed after the runners moved from root to `xc_vm` and left
+root-owned pid files behind. It now falls back to the process table, matching
+on the per-service log path, which appears verbatim on the command line.
+
+**Stop is immediate.** `apiStream` with `sub=stop` marked the row and left
+`cron:dvb` to reconcile within the minute. Waiting is fine when starting and
+useless when the reason for pressing stop is a wedged tuner. It now stops
+dvblast, stops every decryptor on that transponder, and reaps orphans, before
+queueing the job.
+
+Also removed a duplicate `use` of `DvbServiceCatalog` introduced while wiring
+the above, which PHP treats as a fatal error rather than a warning.
+
+Still open: choosing between two audio tracks, which lives in the core stream
+editor rather than this module; an option to follow the NIT while scanning,
+which one operator used to discover six transponders and 196 services in a
+single pass; and a review of the Flussonic module, untouched all session.

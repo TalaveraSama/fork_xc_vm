@@ -152,10 +152,17 @@ class DvbImportService {
 			$rImported++;
 		}
 
+		$rBouquetsApplied = 0;
+
 		foreach ($rBouquets as $rBouquetID) {
 			if ($rBouquetID > 0 && !empty($rStreamIDs)) {
 				BouquetService::addItems('stream', $rBouquetID, $rStreamIDs);
+				$rBouquetsApplied++;
 			}
+		}
+
+		if (!empty($rStreamIDs) && $rBouquetsApplied === 0 && !empty($rBouquets)) {
+			$rErrors[] = 'The chosen bouquet(s) could not be applied.';
 		}
 
 		// Ask each affected tuner node to rebuild its DVBlast. Until that job
@@ -178,6 +185,7 @@ class DvbImportService {
 		return [
 			'status'     => $rImported > 0,
 			'imported'   => $rImported,
+			'bouquets'   => $rBouquetsApplied,
 			'skipped'    => $rSkipped,
 			'errors'     => $rErrors,
 			'stream_ids' => $rStreamIDs,
