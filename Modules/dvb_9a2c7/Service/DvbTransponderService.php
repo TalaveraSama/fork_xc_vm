@@ -296,6 +296,35 @@ class DvbTransponderService {
 	 * @param array $rSignal Result of DvbScanService::parseSignal().
 	 * @return void
 	 */
+	/**
+	 * Last stored reading for every transponder, straight from the table.
+	 *
+	 * Deliberately a single query and no shell. The live meter shells out to
+	 * dvb-fe-tool and blocks the request for seconds, which is fine for one
+	 * button press and ruinous on a timer: a page polling it once per carrier
+	 * ties up a PHP-FPM worker per carrier and the pool runs out, which nginx
+	 * reports as 502. The cron samples, the page reads.
+	 *
+	 * @return array<int,array{strength:?int,quality:?int,streaming:int}>
+	 */
+	public static function signalSnapshot() {
+		$db = self::db();
+
+		$db->query('SELECT `id`, `signal_strength`, `signal_quality`, `streaming` FROM `dvb_transponders`;');
+
+		$rOut = [];
+
+		foreach (($db->num_rows() > 0 ? $db->get_rows() : []) as $rRow) {
+			$rOut[(int) $rRow['id']] = [
+				'strength'  => $rRow['signal_strength'] === null ? null : (int) $rRow['signal_strength'],
+				'quality'   => $rRow['signal_quality'] === null ? null : (int) $rRow['signal_quality'],
+				'streaming' => (int) $rRow['streaming'],
+			];
+		}
+
+		return $rOut;
+	}
+
 	public static function recordSignal($rID, array $rSignal) {
 		self::db()->query(
 			'UPDATE `dvb_transponders` SET `signal_strength` = ?, `signal_quality` = ? WHERE `id` = ?;',

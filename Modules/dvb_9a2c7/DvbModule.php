@@ -141,6 +141,9 @@ class DvbModule extends BaseModule {
 		$router->api('dvb_signal', [DvbController::class, 'apiSignal'], [
 			'permission' => ['adv', 'streams'],
 		]);
+		$router->api('dvb_signal_cache', [DvbController::class, 'apiSignalCache'], [
+			'permission' => ['adv', 'streams'],
+		]);
 		$router->api('dvb_job', [DvbController::class, 'apiJob'], [
 			'permission' => ['adv', 'streams'],
 		]);

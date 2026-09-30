@@ -2029,3 +2029,27 @@ ones, and walks them one at a time with `.always()` chaining so a slow node
 cannot pile requests up. Idle carriers keep showing their last stored reading
 rather than being tuned behind the operator's back, which would claim a tuner
 nobody asked to use.
+
+## 2.7.0 — the bars caused the 502s
+
+2.6.9 put live bars in the transponder list and polled `dvb_signal` once per
+streaming carrier every 15 seconds. That endpoint shells out to
+`dvb-fe-tool --femon` and blocks for `SIGNAL_SECONDS + 1` = four seconds.
+
+So every open copy of the DVB page held a PHP-FPM worker for four seconds per
+carrier, continuously. A panel pool is small; it ran dry, and nginx answered
+**502 across the whole panel** — which also explains the top status bar only
+filling in after a manual reload, since its own AJAX was being refused.
+
+Sampling now happens where the time is free. `cron:dvb` gains
+`sampleSignals()`, which walks the carriers that are on air on this node,
+measures them read-only with `--femon` and stores the result through
+`recordSignal()`. The page reads what the cron left behind:
+`DvbTransponderService::signalSnapshot()` is a single `SELECT` over
+`dvb_transponders`, exposed as `dvb_signal_cache`, and the list fetches it
+once for every row every 20 seconds instead of once per row.
+
+`apiSignal()` is unchanged and still synchronous, because a human pressed a
+button and is waiting for the answer. The rule worth keeping: **an endpoint
+that shells out must never be put on a timer.** One button press is fine; a
+poll multiplies the cost by every open tab.

@@ -483,53 +483,46 @@ renderUnifiedLayoutFooter('admin');
 			dvbNotify('Request failed (' + rXHR.status + '). Check the browser console and the panel log.', 'error');
 		});
 	}
-	// Keep the list's bars alive for carriers that are on air. Those can be
-	// read with dvb-fe-tool --femon, which opens the frontend read-only and
-	// cannot disturb the running dvblast. Carriers that are off are left
-	// showing their last stored reading: measuring one means tuning it, and
-	// doing that behind the operator's back would claim a tuner they did not
-	// ask to use.
+	// Refresh the list's bars from stored readings only.
 	//
-	// One at a time, never overlapping, so a slow node cannot pile requests up.
+	// The first version of this polled the live meter once per carrier. That
+	// endpoint shells out to dvb-fe-tool and blocks for four seconds, so a
+	// handful of carriers held a PHP-FPM worker each, the pool ran dry and
+	// nginx answered 502 across the whole panel. Sampling belongs in cron:dvb,
+	// which already runs every minute; this is one cheap query for every row.
 	function dvbBars() {
-		var rLive = $('.dvb-bars[data-live="1"]');
-
-		if (rLive.length === 0) {
+		if ($('.dvb-bars').length === 0) {
 			return;
 		}
 
-		var rIndex = 0;
-
-		function step() {
-			if (rIndex >= rLive.length) {
-				setTimeout(dvbBars, 15000);
+		$.getJSON('./api?action=dvb_signal_cache', function(rData) {
+			if (!rData || !rData.result || !rData.levels) {
 				return;
 			}
 
-			var rBox = $(rLive[rIndex++]);
+			$('.dvb-bars').each(function() {
+				var rBox = $(this);
+				var rRow = rData.levels[rBox.data('id')];
 
-			$.post('./api?action=dvb_signal', { id: rBox.data('id') }, function(rData) {
-				if (rData && rData.result && rData.signal) {
-					var rS = rData.signal.strength;
-					var rQ = rData.signal.quality;
-
-					if (rS !== null && rS !== undefined) {
-						rBox.find('.dvb-bar-s').css('width', rS + '%');
-						rBox.find('.dvb-val-s').text(rS + '%');
-					}
-
-					if (rQ !== null && rQ !== undefined) {
-						rBox.find('.dvb-bar-q').css('width', rQ + '%');
-						rBox.find('.dvb-val-q').text(rQ + '%');
-					}
+				if (!rRow) {
+					return;
 				}
-			}, 'json').always(step);
-		}
 
-		step();
+				$.each({ s: rRow.strength, q: rRow.quality }, function(rKey, rVal) {
+					if (rVal === null || rVal === undefined) {
+						return;
+					}
+
+					rBox.find('.dvb-bar-' + rKey).css('width', rVal + '%');
+					rBox.find('.dvb-val-' + rKey).text(rVal + '%');
+				});
+			});
+		}).always(function() {
+			setTimeout(dvbBars, 20000);
+		});
 	}
 
-	$(function() { setTimeout(dvbBars, 2000); });
+	$(function() { setTimeout(dvbBars, 3000); });
 </script>
 <script src="assets/js/listings.js"></script>
 </body>

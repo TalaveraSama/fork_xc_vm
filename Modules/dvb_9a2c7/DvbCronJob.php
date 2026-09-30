@@ -62,6 +62,7 @@ class DvbCronJob implements CommandInterface {
 		// Supervision runs on every tick, job or no job: a DVBlast that died
 		// overnight has to come back without anyone pressing anything.
 		$this->supervise($rServerID);
+		$this->sampleSignals($rServerID);
 
 		$rJob = DvbJobService::claim($rServerID);
 
@@ -284,6 +285,37 @@ class DvbCronJob implements CommandInterface {
 	 * @param int $rServerID This node.
 	 * @return void
 	 */
+	/**
+	 * Sample the demodulator for carriers that are on air.
+	 *
+	 * This is the expensive half of the meter and it belongs here, not in a
+	 * web request: dvb-fe-tool blocks for a few seconds, and a page polling
+	 * it per carrier exhausts PHP-FPM and turns the whole panel into 502s.
+	 * Read-only, so it cannot disturb the running dvblast.
+	 *
+	 * @param int $rServerID This node.
+	 * @return void
+	 */
+	private function sampleSignals($rServerID) {
+		foreach (DvbTransponderService::all() as $rTransponder) {
+			if ((int) $rTransponder['server_id'] !== (int) $rServerID || empty($rTransponder['streaming'])) {
+				continue;
+			}
+
+			$rAdapter = DvbAdapterService::pick($rTransponder);
+
+			if ($rAdapter === null) {
+				continue;
+			}
+
+			$rResult = DvbScanService::measureSignal($rTransponder, $rAdapter);
+
+			if (!empty($rResult['status'])) {
+				DvbTransponderService::recordSignal((int) $rTransponder['id'], $rResult['signal']);
+			}
+		}
+	}
+
 	private function supervise($rServerID) {
 		$rCounts = DvbStreamRunner::supervise($rServerID);
 

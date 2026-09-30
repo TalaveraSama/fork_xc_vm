@@ -241,6 +241,21 @@ class DvbController {
 	 *
 	 * @return void
 	 */
+	/**
+	 * Stored signal readings for the list's bars.
+	 *
+	 * One query, no shell, safe to poll. apiSignal() stays synchronous and
+	 * expensive because a human pressed a button and is waiting for it.
+	 *
+	 * @return void
+	 */
+	public function apiSignalCache() {
+		$this->json([
+			'result' => true,
+			'levels' => DvbTransponderService::signalSnapshot(),
+		]);
+	}
+
 	public function apiSignal() {
 		$rID          = (int) $this->input('id', 0);
 		$rTransponder = DvbTransponderService::find($rID);
