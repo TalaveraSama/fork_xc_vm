@@ -8,6 +8,57 @@ warning below is something that actually went wrong, not a precaution.
 
 ---
 
+## Part 0 — a clean panel, before any of this
+
+The DVB module needs a working panel underneath it. On a bare Ubuntu:
+
+```sh
+# 1. A supported release, as root, on a box with nothing else on it.
+#    Supported: Ubuntu 18.04 / 20.04 / 22.04 / 24.04, Debian 11 / 12 / 13,
+#    Rocky 8 / 9, AlmaLinux 8 / 9, CentOS 7 / 8.
+lsb_release -a
+
+# 2. Fetch the release from this fork, not from upstream.
+cd /root
+curl -fL -O https://github.com/TalaveraSama/fork_xc_vm/releases/latest/download/xc_vm.tar.gz
+curl -fsSL https://github.com/TalaveraSama/fork_xc_vm/releases/latest/download/hashes.md5
+md5sum xc_vm.tar.gz          # compare the two before going on
+
+# 3. Extract and run. The installer ships at the root of the archive.
+mkdir -p /root/xcvm && tar xzf xc_vm.tar.gz -C /root/xcvm
+cd /root/xcvm
+python3 install
+```
+
+It creates the `xc_vm` user, the `xc_vm` and `xc_vm_migrate` databases, a
+MariaDB account with a generated password, `/etc/systemd/system/xc_vm.service`,
+`/etc/sudoers.d/xc_vm`, a tmpfs line in `/etc/fstab` for
+`/home/xc_vm/content/streams`, and the crontab entries.
+
+**Write down the admin URL and credentials it prints at the end.** They are
+generated and not shown again.
+
+Then confirm it is actually up before going further:
+
+```sh
+systemctl status xc_vm --no-pager | head -5
+grep XC_VM_VERSION /home/xc_vm/Core/Config/AppConfig.php
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1/
+```
+
+Two things worth knowing at this point, both of which bit this deployment:
+
+* **Install the panel before building the card driver.** The installer runs
+  `apt-get autoremove -y`, which can take `build-essential`, `gcc`, `make` and
+  `libssl-dev` with it, since nothing it installs depends on them. Doing it in
+  this order avoids the problem entirely.
+* **`v4l-utils` goes on, `dvb-tools` does not.** See the next section; the
+  panel install alone cannot scan a transponder.
+
+Everything below is the DVB layer, on top of a panel that already works.
+
+---
+
 ## The short version
 
 | Layer | Comes from | Installed by |
