@@ -2421,3 +2421,28 @@ streaming, and a stop must work even when the panel cannot reach it.
 
 Any future module cron that manages long-lived processes needs the same
 three-line check. Worth promoting to a shared helper if a second one appears.
+
+## 2.7.11 — the DVB module removed from the tree
+
+Removed at the operator's request, for a production VPS with no tuner card.
+It was entirely self-contained: nothing outside `Modules/dvb_9a2c7/`
+referenced it, so the panel loses a navbar entry, a cron line and five tables
+it was never using on that host.
+
+**It is not lost.** The whole module, its four shell tools, the vendored
+tsdecrypt and the installation guide are in history. To bring it back:
+
+    git checkout 566181ee51510121c3d6e26385b81c7c1ae0850a -- Modules/dvb_9a2c7
+
+That commit is `566181e`, the last state in which the module worked on real
+hardware: two transponders on air, 84 services scanned, decryption running
+through NEWCAMD.
+
+**Do not update the tuner node to this release.** `update` copies over the
+tree without deleting, so `Modules/dvb_9a2c7/` would survive on that host as
+orphaned files, running code no release supports. Keep that node on 2.7.10,
+or restore the module before publishing anything it should take.
+
+What leaves with it: five tables (`dvb_adapters`, `dvb_transponders`,
+`dvb_services`, `dvb_camd`, `dvb_jobs`) are no longer created on fresh
+installs; existing databases keep them, harmlessly, until dropped by hand.

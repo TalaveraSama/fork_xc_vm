@@ -1,6 +1,0 @@
-[submodule "libtsfuncs"]
-	path = libtsfuncs
-	url = https://georgi.unixsol.org/git/gfto/libtsfuncs.git
-[submodule "libfuncs"]
-	path = libfuncs
-	url = https://georgi.unixsol.org/git/gfto/libfuncs.git
