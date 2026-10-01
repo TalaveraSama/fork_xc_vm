@@ -219,6 +219,27 @@ class DvbModule extends BaseModule {
 	 *
 	 * @return array<string,string>
 	 */
+	/**
+	 * Bring the carriers down with the panel.
+	 *
+	 * Without this a dvblast keeps `/dev/dvb/adapterN/frontend0` open after
+	 * the panel stops, and the next start cannot have the tuner back. Every
+	 * orphan chased during commissioning arrived this way.
+	 *
+	 * The rows are left marked as streaming on purpose: stopping the panel is
+	 * not the operator saying these carriers should be off, and they come back
+	 * on the next cron tick after a start.
+	 *
+	 * @return void
+	 */
+	public function shutdown(): void {
+		foreach (DvbTransponderService::all() as $rTransponder) {
+			DvbStreamRunner::stop($rTransponder);
+		}
+
+		DvbStreamRunner::killOrphans();
+	}
+
 	public function getCronEntries(): array {
 		return ['* * * * *' => 'cron:dvb'];
 	}

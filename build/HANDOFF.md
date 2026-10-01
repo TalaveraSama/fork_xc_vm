@@ -2372,3 +2372,29 @@ CAID, and EMM forwarding off — that each cost a day here.
 Every claim in the document was checked against the code before committing,
 which is how the tsdecrypt commit hashes turned out to be in
 `vendor/PROVENANCE.txt` rather than where the first draft said.
+
+## Modules are now told when the panel stops
+
+`lsof` on a stopped panel still showed dvblast holding
+`/dev/dvb/adapter0/frontend0`, `dvr0` and six `demux0` handles. Every orphan
+chased during commissioning arrived this way.
+
+It is not a module bug exactly. `DvbStreamRunner::start()` launches dvblast
+under `setsid` on purpose, so it survives the one-minute cron run that
+launched it. Nothing then reaps it, because nothing told the module the panel
+was going away.
+
+`BaseModule` gains an optional `shutdown()`, `ModuleLoader` gains
+`shutdownAll()` which calls it on every loaded module and swallows failures so
+one module cannot block the rest, and `ServiceCommand::stop()` calls it before
+killing anything. `DvbModule::shutdown()` stops each transponder's dvblast and
+reaps leftovers. Rows stay marked streaming on purpose: stopping the panel is
+not the operator saying those carriers should be off.
+
+Worth a second look by whoever picks this up: `stop()` relies on
+`sudo killall -u xc_vm`, with no process name. On Debian and Ubuntu `killall`
+comes from psmisc, where `-u` filters and a NAME is required. If that is so,
+the command fails and kills nothing, which would explain far more than the
+DVB orphans. Not verified — `killall` is absent from the agent's sandbox, and
+this file would rather carry an open question than an unchecked claim. Check
+with `killall -u xc_vm ; echo $?` on a real host.

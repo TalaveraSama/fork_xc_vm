@@ -94,6 +94,19 @@ class ServiceCommand implements CommandInterface {
 		}
 
 		echo "Stopping \XC_VM...\n";
+		// Modules that run long-lived processes get told first. They detach
+		// them deliberately, so nothing else reaps them and a tuner or a port
+		// stays claimed after the panel is gone.
+		try {
+			$rTold = (new \XcVm\Core\Module\ModuleLoader())->loadAll()->shutdownAll();
+		
+			if ($rTold > 0) {
+				echo "Notified " . $rTold . " module(s)\n";
+			}
+		} catch (\Throwable $e) {
+			echo "Module shutdown skipped: " . $e->getMessage() . "\n";
+		}
+		
 		exec('sudo killall -u xc_vm');
 		sleep(1);
 		exec('sudo killall -u xc_vm');
