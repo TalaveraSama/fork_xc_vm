@@ -2398,3 +2398,26 @@ the command fails and kills nothing, which would explain far more than the
 DVB orphans. Not verified — `killall` is absent from the agent's sandbox, and
 this file would rather carry an open question than an unchecked claim. Check
 with `killall -u xc_vm ; echo $?` on a real host.
+
+## Stopping the panel did not stop the cron, so everything came back
+
+The real complaint behind the orphans: stop the panel and dvblast and
+tsdecrypt keep running — and keep coming back. `7beebbc` told modules to shut
+down, which kills them, and a minute later they were up again.
+
+`systemctl stop xc_vm` stops nginx and PHP-FPM. It does not touch the
+crontab. `cron:dvb` therefore keeps firing every minute, reads `streaming = 1`
+from a database that is still perfectly reachable, and restarts every carrier
+the stop just killed. The panel is down, the tuners stay claimed, and killing
+the processes by hand buys sixty seconds.
+
+`ServiceCommand::stop()` now writes `TMP_PATH . 'panel_stopped'` before doing
+anything else, and `start()` removes it. `DvbCronJob::run()` returns
+immediately while that file exists.
+
+The marker is deliberately a file rather than a database flag: the database
+is exactly the thing that is still up and still says the carriers should be
+streaming, and a stop must work even when the panel cannot reach it.
+
+Any future module cron that manages long-lived processes needs the same
+three-line check. Worth promoting to a shared helper if a second one appears.

@@ -59,6 +59,9 @@ class ServiceCommand implements CommandInterface {
 			echo "XC_VM is already running\n";
 			return 1;
 		}
+		// Clear the stop marker so module cron jobs resume.
+		@unlink(TMP_PATH . 'panel_stopped');
+		
 
 		echo "Starting \XC_VM...\n";
 
@@ -94,6 +97,13 @@ class ServiceCommand implements CommandInterface {
 		}
 
 		echo "Stopping \XC_VM...\n";
+		// Leave a marker before anything else. Stopping the panel does not
+		// touch the crontab, so cron:dvb and friends keep firing every minute
+		// and will happily restart everything this stop is about to kill --
+		// the panel goes down and the tuners stay claimed in a loop. Module
+		// cron jobs check for this file and stand down while it exists.
+		@file_put_contents(TMP_PATH . 'panel_stopped', (string) time());
+
 		// Modules that run long-lived processes get told first. They detach
 		// them deliberately, so nothing else reaps them and a tuner or a port
 		// stays claimed after the panel is gone.

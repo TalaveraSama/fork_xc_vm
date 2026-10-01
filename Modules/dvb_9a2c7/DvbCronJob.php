@@ -51,6 +51,14 @@ class DvbCronJob implements CommandInterface {
 			return 0;
 		}
 
+		// Stand down while the panel is stopped. cron keeps running when the
+		// services do not, so without this the supervisor restarts every
+		// carrier a minute after someone stopped the panel, and the tuners
+		// are never actually released.
+		if (is_file(TMP_PATH . 'panel_stopped')) {
+			return 0;
+		}
+
 		$rServerID = defined('SERVER_ID') ? (int) SERVER_ID : 1;
 
 		// Only the main server prunes, so the housekeeping UPDATEs are not run
