@@ -81,6 +81,23 @@ fi
 
 say "Building tsdecrypt"
 
+# A prebuilt binary, if one was shipped, saves pulling ~200 MB of toolchain
+# onto a streaming node. It is only used if it actually runs here: tsdecrypt
+# links against libcrypto, and Ubuntu 20.04 carries libcrypto.so.1.1 while
+# 22.04 and later carry libcrypto.so.3, so a binary from the wrong release
+# fails at load time. `--version` is the cheapest honest test of that.
+PREBUILT="$MODULE_DIR/vendor/prebuilt/tsdecrypt-$(uname -m)"
+
+if [ ! -e "$PREFIX/bin/tsdecrypt" ] && [ -x "$PREBUILT" ]; then
+	if "$PREBUILT" --version >/dev/null 2>&1; then
+		install -m 0755 "$PREBUILT" "$PREFIX/bin/tsdecrypt"
+		ok "installed the prebuilt binary from vendor/prebuilt"
+	else
+		warn "the prebuilt binary will not run here (usually an OpenSSL version"
+		warn "mismatch); building from source instead"
+	fi
+fi
+
 if command -v tsdecrypt >/dev/null 2>&1; then
 	ok "already installed at $(command -v tsdecrypt), leaving it alone"
 elif [ ! -d "$VENDOR_DIR" ]; then

@@ -130,6 +130,12 @@ is unreachable the submodule update **returns success and leaves the
 directories empty**, and the build then fails in a way that looks like a
 compiler problem. Vendoring removes the dependency on a single host being up.
 
+If you would rather not put a build toolchain on a streaming node, drop a
+prebuilt binary at `vendor/prebuilt/tsdecrypt-$(uname -m)`; the script
+installs it instead, after checking it actually runs. See
+`vendor/prebuilt/README.md`, which explains why a binary copied from one
+Ubuntu release will not load on another, and how to build one that travels.
+
 The pinned commits are recorded in `vendor/PROVENANCE.txt` — tsdecrypt
 `f4876e84`, libfuncs `55d6236c`, libtsfuncs `1482ed31`. The vendored tree is
 release 10.0.
