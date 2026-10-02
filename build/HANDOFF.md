@@ -2513,3 +2513,22 @@ The apt half is the weakest part and is honest about it: it seeds
 on the build machine are fetched with `--reinstall`, but a target with a
 materially different package set may still want for something. The panel and
 runtime halves are exact.
+
+## 2.7.12 — Flussonic audited against the DVB checklist
+
+With DVB gone, the Flussonic module got the same audit that found most of the
+DVB bugs. It passes almost all of it: every view ends with
+`renderUnifiedLayoutFooter`, every script block carries `id="scripts"`,
+nothing calls `toastr`, no SQL comment holds a semicolon, no duplicate `use`.
+
+One real fault: four AJAX calls had no `.fail()`. `flussonic.php` had three
+of three missing, `flussonic_streams.php` one of two. A failed request there
+produced no toast, no console entry, nothing at all — a 502 or an expired
+session looked exactly like a button that does nothing, which is how the DVB
+views wasted an afternoon before 2.5.0.
+
+All four now report the status code and point at the panel log.
+
+The checklist, for the next module audited: footer present, `id="scripts"` on
+the script block, `$.toast` rather than `toastr`, a `.fail()` on every
+request, no semicolon inside an SQL comment, no duplicate imports.
