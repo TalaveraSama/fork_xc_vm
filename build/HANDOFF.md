@@ -2570,3 +2570,29 @@ It is found by its grants:
 And it must be run **before** dropping the databases, since the grants are
 dropped with them — after which the account is orphaned and unfindable
 without guessing.
+
+## Two corrections: the installer asset, and the uninstaller
+
+**`xc_vm.tar.gz` does not contain the installer.** It is the panel tree
+alone. `build-release.sh` puts `install` into **`XC_VM.zip`** together with
+the tarball:
+
+    (cd "$WORK"    && zip -q "$OUT_DIR/XC_VM.zip" $zip_entries)
+    (cd "$OUT_DIR" && zip -q -j XC_VM.zip xc_vm.tar.gz)
+
+So a fresh install takes the zip, not the tar. Documented the wrong one and
+an operator hit `python3: can't open file 'install'` on a real box. The clue
+was there — line 478 copies the installer to `$WORK`, and `$WORK` is the zip
+staging directory, not the tarball's contents. Read what the variable is,
+not what its name suggests.
+
+**The release ships an `uninstall` script**, along with `doctor`,
+`repair-database`, `update` and `service`. They come from the upstream base
+layer and are therefore absent from this repository, which is how
+UNINSTALL.md came to open with "there is no uninstaller". It now says to look
+for that script first and treats the manual procedure as the fallback.
+
+General lesson, twice over in one message: absence from this tree does not
+mean absence from the release. The published archive is this repository
+merged over an upstream base, and anything inherited is invisible to a grep
+here.

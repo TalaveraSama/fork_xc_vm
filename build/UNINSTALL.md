@@ -1,7 +1,18 @@
 # Uninstalling XC_VM by hand
 
-There is no uninstaller. This is the complete list of what `build/install`
-creates, in the order it has to be undone.
+**Check for the bundled uninstaller first.** The release archive carries an
+`uninstall` script at its root, inherited from the upstream base layer. It is
+not in this repository, which is why earlier drafts of this file claimed none
+existed:
+
+```sh
+head -30 /home/xc_vm/uninstall     # read it before running it
+/home/xc_vm/uninstall
+```
+
+What follows is the manual equivalent, for when that script is missing, fails
+part way, or an install is already half-removed. It is the complete list of
+what `build/install` creates, in the order it has to be undone.
 
 **The order matters.** A tmpfs is mounted inside `/home/xc_vm`; deleting the
 directory before unmounting it gives errors at best. And the root crontab may
