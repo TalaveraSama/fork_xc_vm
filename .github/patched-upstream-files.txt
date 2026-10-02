@@ -33,11 +33,16 @@
 # and is not. Each was reproduced on the real server before being fixed.
 
 Cli/Commands/BinariesCommand.php
+Cli/Commands/ProxyInstallFlow.php
+Cli/Commands/ServiceCommand.php
 Cli/Commands/StatusCommand.php
+Cli/Commands/ToolsCommand.php
 Cli/Commands/UpdateCommand.php
 Cli/CronJobs/MaxMindCronJob.php
 Cli/CronJobs/ProxyArchiveCronJob.php
 Core/GeoIP/GeoIPService.php
+Core/Module/BaseModule.php
+Core/Module/ModuleLoader.php
 Core/Module/ModuleMigrator.php
 Core/Updates/GitHubReleases.php
 Public/Controllers/Admin/EpgViewController.php
