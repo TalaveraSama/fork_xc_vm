@@ -59,6 +59,10 @@
                             window.xcToast("Failed to get libraries! Check your server credentials.", "error");
                         }
                         $("#libraries").val(JSON.stringify(rLibraries));
+                    }).fail(function (rXHR) {
+                        // Silent before: no toast, no console entry, so a 502 or an
+                        // expired session looked like a button that does nothing.
+                        window.xcToast("Request failed (" + rXHR.status + "). Check the panel log.", "error");
                     });
                 } else {
                     window.xcToast("Please fill in all Plex server information and credentials.", "warning");

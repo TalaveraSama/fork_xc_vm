@@ -2532,3 +2532,26 @@ All four now report the status code and point at the panel log.
 The checklist, for the next module audited: footer present, `id="scripts"` on
 the script block, `$.toast` rather than `toastr`, a `.fail()` on every
 request, no semicolon inside an SQL comment, no duplicate imports.
+
+## 2.7.13 — the checklist applied to the last two modules
+
+`ministra_85a7d` passes all six points. `plex_20cd9` and `watch_2541a` were
+missing nine `.fail()` handlers between them, now added.
+
+Two things about these modules that the first attempt got wrong, and which
+matter for anyone auditing them next:
+
+* **They indent with spaces, not tabs.** A patcher anchored on `\t*` finds no
+  closing brace and reports the call sites as unrecognisable. They are not.
+* **They notify with `window.xcToast(msg, "error")`, not `$.toast`.** Already
+  used in seven files there, so the checklist's "always `$.toast`" is really
+  "always the module's own helper".
+
+The automated patch was aborted twice by its own balance check before it ran.
+Both were false alarms in the *expectation*, not the edit: the handler opens
+with `}).fail(` whose brace replaces the one on the line it substitutes, so
+the net change is one brace, not two. Worth recording because the instinct on
+seeing a guard fire twice is to disable it, and the guard was the only reason
+five JavaScript files were not quietly mangled while nobody was looking. The
+fix was to assert the real invariant — balanced braces, and exactly one more
+opening brace per handler — rather than a hand-counted delta.
