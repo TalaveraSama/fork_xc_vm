@@ -733,31 +733,45 @@ def install_distribution_binaries(dist_id, version):
     temp_tar_file = f"/tmp/{patch_name}"
     temp_extract_dir = f"/tmp/{patch_name.replace('.tar.gz', '_extract')}"
 
-    try:
-        # Always download fresh binaries from GitHub
-        printc(
-            f"Downloading {display_name} binaries from GitHub release {release_tag}...",
-            col.OKBLUE,
-        )
-        printc(f"URL: {remote_url}", col.OKBLUE)
+    # Prefer a copy sitting next to the installer, the same way the panel
+    # archive is handled above. That is what makes an offline bundle work:
+    # drop ubuntu_22.tar.gz beside `install` and nothing reaches the network.
+    local_patch = os.path.join(rPath, patch_name)
 
-        # Remove old file if exists
+    use_local = os.path.exists(local_patch) and is_valid_tar(local_patch)
+
+    if use_local:
+        printc(f"Using local {patch_name}, not downloading", col.OKGREEN)
+
         if os.path.exists(temp_tar_file):
             os.remove(temp_tar_file)
 
-        # Retry on transient network/DNS failures (e.g. resolver not ready yet).
-        last_err = None
-        for attempt in range(1, 5):
-            try:
-                urllib.request.urlretrieve(remote_url, temp_tar_file)
-                last_err = None
-                break
-            except Exception as e:
-                last_err = e
-                printc(f"Download attempt {attempt}/4 failed: {e}", col.WARNING)
-                time.sleep(5)
-        if last_err is not None:
-            raise last_err
+        shutil.copyfile(local_patch, temp_tar_file)
+
+    try:
+        if not use_local:
+            printc(
+                f"Downloading {display_name} binaries from GitHub release {release_tag}...",
+                col.OKBLUE,
+            )
+            printc(f"URL: {remote_url}", col.OKBLUE)
+
+            if os.path.exists(temp_tar_file):
+                os.remove(temp_tar_file)
+
+            # Retry on transient network/DNS failures (e.g. resolver not ready).
+            last_err = None
+            for attempt in range(1, 5):
+                try:
+                    urllib.request.urlretrieve(remote_url, temp_tar_file)
+                    last_err = None
+                    break
+                except Exception as e:
+                    last_err = e
+                    printc(f"Download attempt {attempt}/4 failed: {e}", col.WARNING)
+                    time.sleep(5)
+            if last_err is not None:
+                raise last_err
 
         if not (os.path.exists(temp_tar_file) and os.path.getsize(temp_tar_file) > 0):
             printc(f"Failed to download {display_name} binaries", col.FAIL)

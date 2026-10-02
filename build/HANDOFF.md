@@ -2482,3 +2482,34 @@ what was offered.
 Not yet done: `bouquets` stores lists of stream ids as JSON, so a bouquet
 imported alongside streams that were renumbered will point at the wrong
 channels. Remapping those ids is the obvious next piece of work.
+
+## Offline installer bundle
+
+A normal install reaches the network three times: the panel archive, the
+distribution's runtime binaries, and roughly 47 apt packages.
+
+The first was already handled — `install` prefers a local `./xc_vm.tar.gz`
+when one is valid. The second now behaves the same way: it looks for
+`ubuntu_22.tar.gz` (or the matching `debian_NN.tar.gz`) next to the installer
+and copies it instead of downloading. The download block moved under
+`if not use_local`, so nothing resolves DNS when the file is there.
+
+Care taken: the first draft called `extract_distribution_binaries()`, a
+function that does not exist, which would have been a `NameError` at the
+worst possible moment. `compile()` does not catch an undefined name, so it
+was found by grepping for the definition rather than by trusting the syntax
+check — the habit of checking the artefact rather than the exit code.
+
+`build/make-offline-bundle.sh` assembles the three parts plus an
+`install-offline.sh` into one tarball. It must run on a machine matching the
+**target** distribution, because the .debs are resolved against the running
+release: an Ubuntu 22 bundle built on Ubuntu 20 contains the wrong packages.
+
+    sudo bash build/make-offline-bundle.sh 2.7.11
+
+The apt half is the weakest part and is honest about it: it seeds
+`/var/cache/apt/archives` from the bundle and runs `dpkg -i` with an
+`apt-get -f install --no-download` fallback. Dependencies already satisfied
+on the build machine are fetched with `--reinstall`, but a target with a
+materially different package set may still want for something. The panel and
+runtime halves are exact.
