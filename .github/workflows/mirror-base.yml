@@ -20,6 +20,19 @@ on:
         description: 'Panel version to mirror (blank = read from AppConfig.php)'
         required: false
         type: string
+  # A push-tag route to the same job, because `workflow_dispatch` needs either
+  # the Actions tab or a working `gh` -- and on Ubuntu 20.04 `gh` is often
+  # gitsome, an unrelated tool. Pushing a tag is something every git client
+  # can do:  git tag seed-base-2.3.9 && git push origin seed-base-2.3.9
+  #
+  # `seed-base*`, not `base-*`: this workflow publishes a release tagged
+  # `base-<version>`, and a trigger matching what the job creates would be a
+  # loop waiting for the day the release is made by something other than
+  # GITHUB_TOKEN. The tag is only a doorbell; the version still comes from
+  # AppConfig.php.
+  push:
+    tags:
+      - 'seed-base*'
   schedule:
     - cron: '30 4 * * 1'
 
@@ -48,6 +61,8 @@ jobs:
 
       - name: Resolve version
         id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           v='${{ inputs.version }}'
@@ -58,7 +73,30 @@ jobs:
           [ -n "$v" ] || { echo "::error::could not determine the version"; exit 1; }
           echo "version=$v" >> "$GITHUB_OUTPUT"
           echo "tag=base-$v" >> "$GITHUB_OUTPUT"
-          echo "mirroring $UPSTREAM @ $v"
+
+          # Which upstream release the base layer must come from. Deliberately
+          # not $v: this fork's number runs ahead, and upstream's 2.4.x/2.5.x
+          # tags are prereleases of an unreleased line, so asking them for
+          # "2.4.0" succeeds and returns a tree this source was never built
+          # against. Only the manifest knows the real answer.
+          manifest=.github/upstream-base.txt
+          # `|| true`: grep exits 1 on no match and 2 on no file, and under
+          # `set -e` that kills the step here instead of at the check below --
+          # leaving the fallback unreachable and the failure unexplained.
+          up=$(grep -vE '^[[:space:]]*(#|$)' "$manifest" 2>/dev/null \
+               | head -1 | tr -d '[:space:]' || true)
+          if [ -z "$up" ]; then
+            # `releases/latest` is stable-only, so this cannot pick a prerelease.
+            up=$(gh release view --repo "$UPSTREAM" --json tagName --jq .tagName 2>/dev/null || true)
+            [ -n "$up" ] || { echo "::error::no $manifest, and $UPSTREAM has no stable release"; exit 1; }
+            echo "::warning::no $manifest; falling back to $UPSTREAM's latest stable, $up"
+          fi
+          if ! gh release view "$up" --repo "$UPSTREAM" >/dev/null 2>&1; then
+            echo "::error::$manifest asks for $UPSTREAM @ $up, which does not exist"
+            exit 1
+          fi
+          echo "upstream_tag=$up" >> "$GITHUB_OUTPUT"
+          echo "mirroring $UPSTREAM @ $up as base-$v"
 
       - name: Skip if already mirrored
         id: check
@@ -80,10 +118,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.v.outputs.version }}
+          UPSTREAM_TAG: ${{ steps.v.outputs.upstream_tag }}
         run: |
           set -euo pipefail
           mkdir -p dl
-          gh release download "$VERSION" --repo "$UPSTREAM" \
+          gh release download "$UPSTREAM_TAG" --repo "$UPSTREAM" \
             --pattern 'xc_vm.tar.gz' --pattern 'hashes.md5' --dir dl
           ls -la dl
 
@@ -96,7 +135,7 @@ jobs:
             fi
             echo "md5 verified: $actual"
           else
-            echo "::warning::upstream published no hashes.md5 for $VERSION"
+            echo "::warning::upstream published no hashes.md5 for $UPSTREAM_TAG"
           fi
 
           tar -tzf dl/xc_vm.tar.gz > /dev/null
@@ -108,18 +147,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.v.outputs.tag }}
           VERSION: ${{ steps.v.outputs.version }}
+          UPSTREAM_TAG: ${{ steps.v.outputs.upstream_tag }}
         run: |
           set -euo pipefail
           if ! gh release view "$TAG" > /dev/null 2>&1; then
             gh release create "$TAG" \
               --title "Base deploy tree $VERSION" \
-              --notes "Upstream's \`xc_vm.tar.gz\` for $VERSION, mirrored unmodified from
-[\`$UPSTREAM\`](https://github.com/$UPSTREAM/releases/tag/$VERSION) and verified
-against its \`hashes.md5\`.
+              --notes "Upstream's \`xc_vm.tar.gz\` for $UPSTREAM_TAG, mirrored unmodified
+          from [\`$UPSTREAM\`](https://github.com/$UPSTREAM/releases/tag/$UPSTREAM_TAG) and
+          verified against its \`hashes.md5\`.
 
-Used as the base layer by \`build-release.yml\`, so building a release here does
-not depend on upstream staying reachable. Not a panel release -- see the
-version-tagged ones for those." \
+          Base layer for this fork's **$VERSION**, used by \`build-release.yml\`, so building
+          a release here does not depend on upstream staying reachable. Not a panel release
+          -- see the version-tagged ones for those." \
               --prerelease
           fi
+          # Machine-readable, right next to the archive: build-release quotes
+          # the upstream version in the panel release notes, and that claim has
+          # to come from the layer actually used, not from whatever upstream
+          # happens to be publishing on the day the panel gets built.
+          printf '%s\n' "$UPSTREAM_TAG" > dl/upstream-tag.txt
           gh release upload "$TAG" dl/* --clobber

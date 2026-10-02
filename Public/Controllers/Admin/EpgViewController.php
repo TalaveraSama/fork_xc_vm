@@ -28,8 +28,9 @@ class EpgViewController extends BaseAdminController {
             exit;
         }
 
-        $rPageInt = max(intval(RequestManager::getAll()['page']), 1);
-        $rLimit = max(intval(RequestManager::getAll()['entries']), SettingsManager::getAll()['default_entries']);
+        // Reachable from the menu with no query string; see StreamRankController.
+        $rPageInt = max(intval(RequestManager::get('page', 0)), 1);
+        $rLimit = max(intval(RequestManager::get('entries', 0)), SettingsManager::getAll()['default_entries']);
         $rStart = ($rPageInt - 1) * $rLimit;
         $rWhere = $rWhereV = array();
         $rWhere[] = '`type` = 1 AND `epg_id` IS NOT NULL AND `channel_id` IS NOT NULL';

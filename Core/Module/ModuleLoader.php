@@ -273,6 +273,29 @@ class ModuleLoader {
      *
      * @return string[] Complete crontab lines, each ending with "# XC_VM".
      */
+    /**
+     * Tell every loaded module the panel is stopping.
+     *
+     * Failures are swallowed on purpose: a module that throws here must not
+     * stop the rest from being told, and must not stop the shutdown.
+     *
+     * @return int Modules notified.
+     */
+    public function shutdownAll(): int {
+        $count = 0;
+
+        foreach ($this->modules as $module) {
+            try {
+                $module->shutdown();
+                $count++;
+            } catch (\Throwable $e) {
+                // keep going
+            }
+        }
+
+        return $count;
+    }
+
     public function collectCronEntries(): array {
         if (!defined('PHP_BIN') || !defined('MAIN_HOME')) {
             return [];

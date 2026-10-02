@@ -85,7 +85,7 @@ class ServerInstallCommand implements CommandInterface {
 			// proxy.tar.gz is fetched from XC_VM_Proxy releases (not shipped in LFS) and
 			// kept fresh by cron:proxy. Self-heal here so a brand-new panel that has not
 			// run the cron yet still gets a valid local archive before shipping it to the node.
-			$rProxyRepo = new GitHubReleases(GIT_OWNER, GIT_REPO_PROXY, SettingsManager::getAll()['update_channel']);
+			$rProxyRepo = new GitHubReleases(GIT_OWNER_PROXY, GIT_REPO_PROXY, SettingsManager::getAll()['update_channel']);
 			$rProxyResult = (new ProxyArchiveUpdater($rProxyRepo))->ensure(false, !empty(SettingsManager::getAll()['proxy_force_local']));
 			if ($rProxyResult['action'] === 'error' && !is_file($rInstallDir . $rInstallFiles)) {
 				$db->query('UPDATE `servers` SET `status` = 4 WHERE `id` = ?;', $rServerID);

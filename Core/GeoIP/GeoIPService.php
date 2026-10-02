@@ -29,9 +29,7 @@ class GeoIPService {
 	public static function getIPInfo($rIP) {
 		if (!empty($rIP)) {
 			if (!file_exists(CONS_TMP_PATH . md5($rIP) . '_geo2')) {
-				$rGeoIP = new \MaxMind\Db\Reader(GEOLITE2_BIN);
-				$rResponse = $rGeoIP->get($rIP);
-				$rGeoIP->close();
+				$rResponse = self::read(GEOLITE2_BIN, $rIP);
 				if ($rResponse) {
 					file_put_contents(CONS_TMP_PATH . md5($rIP) . '_geo2', json_encode($rResponse));
 				}
@@ -54,9 +52,7 @@ class GeoIPService {
 		if (!empty($rIP)) {
 			$rResponse = (file_exists(CONS_TMP_PATH . md5($rIP) . '_isp') ? json_decode(file_get_contents(CONS_TMP_PATH . md5($rIP) . '_isp'), true) : null);
 			if (!is_array($rResponse)) {
-				$rGeoIP = new \MaxMind\Db\Reader(GEOISP_BIN);
-				$rResponse = $rGeoIP->get($rIP);
-				$rGeoIP->close();
+				$rResponse = self::read(GEOISP_BIN, $rIP);
 				if (is_array($rResponse)) {
 					file_put_contents(CONS_TMP_PATH . md5($rIP) . '_isp', json_encode($rResponse));
 				}
@@ -64,6 +60,54 @@ class GeoIPService {
 			return $rResponse;
 		}
 		return false;
+	}
+
+	/**
+	 * Read one IP out of a MaxMind database, tolerating an absent one.
+	 *
+	 * GeoIP is enrichment, not a dependency: the country code decorates logs
+	 * and only gates playback for a line that pins a country. But
+	 * `new Reader($path)` throws when the file is not there, and
+	 * Public/stream/auth.php calls this on every playback request without a
+	 * try/catch and with display_errors off -- so an absent database does not
+	 * degrade playback, it silently kills it, while playlist downloads keep
+	 * working because they never look up an IP. That is the shape of the
+	 * outage seen in the field: the line authenticates, pulls its M3U, and
+	 * nothing plays.
+	 *
+	 * The databases are downloaded post-install by `cron:maxmind`, which the
+	 * installer itself calls and explicitly treats as non-fatal, so a fresh
+	 * server can legitimately reach first playback with an empty bin/maxmind.
+	 * GeoIP2-ISP is a paid database most installs never have at all, and
+	 * `show_isps` reaches it on the same path.
+	 *
+	 * @param string $rPath Absolute path to the .mmdb.
+	 * @param string $rIP   Address to look up.
+	 * @return array|false Decoded record, or false when unavailable.
+	 */
+	private static function read($rPath, $rIP) {
+		static $rWarned = [];
+
+		if (!is_file($rPath)) {
+			if (!isset($rWarned[$rPath])) {
+				$rWarned[$rPath] = true;
+				error_log('GeoIP database missing: ' . $rPath . ' -- run `console.php cron:maxmind --force`');
+			}
+			return false;
+		}
+
+		try {
+			$rGeoIP = new \MaxMind\Db\Reader($rPath);
+			$rResponse = $rGeoIP->get($rIP);
+			$rGeoIP->close();
+			return $rResponse;
+		} catch (\Throwable $e) {
+			if (!isset($rWarned[$rPath])) {
+				$rWarned[$rPath] = true;
+				error_log('GeoIP lookup failed on ' . $rPath . ': ' . $e->getMessage());
+			}
+			return false;
+		}
 	}
 
 	/**

@@ -225,7 +225,12 @@ class LbInstallFlow {
 		// FPM (xc_vm) and makes config.enc decryption fall back to a default config.
 		call_user_func($rRunSSH, $rConn, 'sudo chown xc_vm:xc_vm -R /home/xc_vm >/dev/null 2>&1');
 		call_user_func($rRunSSH, $rConn, 'sudo -u xc_vm ' . PHP_BIN . ' ' . MAIN_HOME . 'console.php status 1');
-		call_user_func($rRunSSH, $rConn, 'sudo -u xc_vm ' . PHP_BIN . ' ' . MAIN_HOME . 'console.php startup');
+		// As root, not as xc_vm: startup installs the root crontab via
+		// "sudo crontab" and xc_vm has no passwordless sudo, so over a
+		// non-interactive SSH channel the sudo prompt gets no answer and the
+		// crontab is silently never written -- the node then runs no cron at
+		// all, including cron:dvb, with nothing in the output to say so.
+		call_user_func($rRunSSH, $rConn, 'sudo ' . PHP_BIN . ' ' . MAIN_HOME . 'console.php startup');
 		call_user_func($rRunSSH, $rConn, 'sudo -u xc_vm ' . PHP_BIN . ' ' . MAIN_HOME . 'console.php cron:servers');
 	}
 

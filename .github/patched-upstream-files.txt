@@ -1,0 +1,78 @@
+# Upstream files this fork modifies -- the single source of truth.
+#
+# Consumed by:
+#   .github/workflows/build-release.yml   the set of PHP it lints before a release
+#   .github/workflows/watch-upstream.yml  which patches an upstream release collides with
+#
+# Both used to carry their own hardcoded copy of this list. They disagreed: the
+# watcher named seven files, the linter diffed against a commit that does not
+# exist in this repository and so checked nothing at all. One list, read by
+# both, is what stops them drifting apart again.
+#
+# Paths are relative to this repository's root. Upstream (Vateron-Media/XC_VM)
+# keeps the same tree under `src/`, so the watcher prefixes `src/` before it
+# compares. Everything else this fork adds lives in `Modules/flussonic_1f4a9/`,
+# `build/` and `.github/`, which upstream never touches -- that is what keeps
+# an upgrade cheap.
+#
+# Verified by byte comparison against upstream 2.3.9, with two corrections that
+# a naive diff gets wrong:
+#   * line endings are not changes. `* text=auto` in .gitattributes rewrites
+#     CRLF on checkout, which makes ~200 untouched files look modified.
+#   * Git LFS pointers are not changes. Public/assets/admin/videos/login-bg.mp4
+#     is LFS upstream; a clone without LFS yields a 132-byte pointer. Our copy
+#     matches its oid sha256 exactly, so it is NOT patched.
+#
+# Keep this list exact. build-release.yml fails the build if an entry here is
+# missing from the tree, and a file patched but *not* listed here is one that
+# an upstream upgrade can silently revert.
+
+
+# --- Carry the fixes documented in build/HANDOFF.md -------------------------
+# Reverting any of these puts the panel back in a state that looks installed
+# and is not. Each was reproduced on the real server before being fixed.
+
+Cli/Commands/BinariesCommand.php
+Cli/Commands/StatusCommand.php
+Cli/Commands/UpdateCommand.php
+Cli/CronJobs/MaxMindCronJob.php
+Cli/CronJobs/ProxyArchiveCronJob.php
+Core/GeoIP/GeoIPService.php
+Core/Module/ModuleMigrator.php
+Core/Updates/GitHubReleases.php
+Public/Controllers/Admin/EpgViewController.php
+Public/Controllers/Admin/StreamRankController.php
+Public/Views/admin/topbar.php
+migrations/002_add_maxmind_cron.sql
+migrations/008_add_module_updates_cron.sql
+migrations/009_add_proxy_cron.sql
+service
+
+
+# --- Only redirect the panel at this fork -----------------------------------
+# GIT_OWNER_MAIN / GIT_OWNER_BIN / GIT_OWNER_UPDATE / GIT_OWNER_PROXY and the
+# repo names. No behaviour changes, so an upstream release touching these is
+# cheap to re-apply: swap the owner constant back in and the patch is done.
+#
+# BinariesCommand, MaxMindCronJob, ProxyArchiveCronJob and UpdateCommand used
+# to live here. They moved up: pointing the constants at this fork changed the
+# *shape* of the repositories they talk to, and the code had to learn that
+# shape. Re-applying them is no longer a constant swap.
+
+Cli/Commands/LbInstallFlow.php
+Cli/Commands/ServerInstallCommand.php
+Cli/CronJobs/UpdateCronJob.php
+Core/Config/AppConfig.php
+Core/Proxy/ProxyArchiveUpdater.php
+Infrastructure/Bootstrap/WebApiBootstrap.php
+
+
+# --- Drift captured from the running panel ----------------------------------
+# Not a deliberate patch: the panel appends missing language keys at runtime
+# with the key as its own value, and that edit came across when the source was
+# captured. `mass_edit_mags` / `mass_edit_enigmas` are the navbar labels
+# CoreNavbarProvider.php asks for and upstream's en.ini genuinely lacks -- it
+# only defines the `permission_`-prefixed variants. Listed so the watcher
+# reports it rather than letting an upgrade quietly drop it.
+
+resources/langs/en.ini

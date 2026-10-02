@@ -151,6 +151,27 @@ class WatchModule extends BaseModule {
         $registry->register(new WatchItemCommand());
     }
 
+    /**
+     * Schedule the folder scan.
+     *
+     * This was missing, and registerCommands() above is why it went unnoticed:
+     * the command existed and ran perfectly by hand, so the module looked
+     * installed and correct. Nothing ever called it. BaseModule's default
+     * getCronEntries() returns an empty array, ModuleLoader::collectCronEntries()
+     * therefore emitted no line for this module, and StartupCommand and
+     * StatusCommand wrote a crontab with no watch entry in it. Folders sat
+     * there and were never scanned.
+     *
+     * Every minute is deliberate and is the interval CronProviderInterface
+     * documents for this exact job. WatchCronJob takes a PID lock in
+     * CACHE_TMP_PATH/watch_pid and exits immediately when a previous scan is
+     * still running, and `watch_folders` has no per-folder interval column,
+     * so the crontab line is the only schedule there is.
+     */
+    public function getCronEntries(): array {
+        return ['* * * * *' => 'cron:watch'];
+    }
+
     public function registerNavbar(NavbarRegistry $registry): void {
         // Profile dropdown: core registers items under the 'profile' parent
         // (CoreNavbarProvider::_profile), reserving order 100–980 for modules.

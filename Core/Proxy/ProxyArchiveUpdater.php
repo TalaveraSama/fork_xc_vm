@@ -45,7 +45,9 @@ class ProxyArchiveUpdater {
 	private string $indexPath;
 
 	/**
-	 * @param GitHubReleases $repo       Client bound to GIT_OWNER / GIT_REPO_PROXY.
+	 * @param GitHubReleases $repo       Client for the mirror that answered, which
+	 *                                   may be the upstream fallback rather than
+	 *                                   GIT_OWNER_PROXY. Ask it, do not assume.
 	 * @param string|null    $installDir Override the target dir (defaults to bin/install/); for tests.
 	 */
 	public function __construct(GitHubReleases $repo, ?string $installDir = null) {
@@ -135,7 +137,14 @@ class ProxyArchiveUpdater {
 			return $this->result($rVersion, 'skip', null);
 		}
 
-		$rURL = 'https://github.com/' . GIT_OWNER . '/' . GIT_REPO_PROXY . '/releases/download/' . $rVersion . '/' . self::ASSET;
+		// Ask the resolved repository, never GIT_OWNER_PROXY. locate() falls back
+		// to the upstream owner when the fork mirror does not exist, and every
+		// other lookup above already followed it — getAssetHash() read the
+		// hashes.md5 of whichever owner answered. Hardcoding the constant here
+		// listed the release from one owner and then downloaded from the other,
+		// so a panel with no fork mirror reported a valid md5 and then a 404.
+		$rURL = 'https://github.com/' . $this->repo->getOwner() . '/' . $this->repo->getRepoName()
+			. '/releases/download/' . $rVersion . '/' . self::ASSET;
 
 		$rError = null;
 		for ($rAttempt = 1; $rAttempt <= 2; $rAttempt++) {

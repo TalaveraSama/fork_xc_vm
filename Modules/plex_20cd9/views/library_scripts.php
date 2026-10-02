@@ -12,6 +12,10 @@
 				}
 				$.getJSON('./api?action=disable_plex', function() {
 					toast('Libraries have been disabled.');
+				}).fail(function (rXHR) {
+				    // Silent before: no toast, no console entry, so a 502 or an
+				    // expired session looked like a button that does nothing.
+				    window.xcToast("Request failed (" + rXHR.status + "). Check the panel log.", "error");
 				});
 			});
 		};
@@ -23,6 +27,10 @@
 				}
 				$.getJSON('./api?action=enable_plex', function() {
 					toast('Libraries have been enabled.');
+				}).fail(function (rXHR) {
+				    // Silent before: no toast, no console entry, so a 502 or an
+				    // expired session looked like a button that does nothing.
+				    window.xcToast("Request failed (" + rXHR.status + "). Check the panel log.", "error");
 				});
 			});
 		};
@@ -34,6 +42,10 @@
 				}
 				$.getJSON('./api?action=kill_plex', function() {
 					toast('Plex Sync processes have been killed.');
+				}).fail(function (rXHR) {
+				    // Silent before: no toast, no console entry, so a 502 or an
+				    // expired session looked like a button that does nothing.
+				    window.xcToast("Request failed (" + rXHR.status + "). Check the panel log.", "error");
 				});
 			});
 		};

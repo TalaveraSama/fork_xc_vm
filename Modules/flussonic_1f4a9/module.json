@@ -2,7 +2,7 @@
   "name": "flussonic",
   "hash_id": "1f4a96e8d32b4c7a9152f603eb78ad41",
   "description": "Flussonic Media Server panel: register Flussonic origins, browse every stream they publish with live status, bitrate, clients and DVR depth, and import the ones you pick as live channels with the playback protocol of your choice (HLS, LL-HLS, MPEG-TS, DASH, RTMP or RTSP).",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "requires_core": ">=2.3",
   "environment": "main",
   "priority": 0,

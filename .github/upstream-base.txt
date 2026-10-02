@@ -1,0 +1,18 @@
+# Which upstream release this fork's source layer is derived from.
+#
+# NOT the same thing as XC_VM_VERSION in Core/Config/AppConfig.php. That is
+# this fork's own number and deliberately runs ahead, so the panel's updater
+# has something to offer. This file answers a different question: whose
+# deploy tree do we overlay our source onto, and which upstream tag do the
+# release notes credit. It changes only when the fork actually merges a
+# newer upstream release -- which is exactly what watch-upstream.yml opens
+# an issue about.
+#
+# Keeping the two apart is not pedantry. Upstream's 2.4.x and 2.5.x tags
+# exist but are prereleases of an unreleased line, so asking upstream for
+# "our" 2.4.0 succeeds and hands back a tree this fork's source was never
+# built against -- and the watcher, which uses this as a git ref inside
+# upstream's repository, would have compared from the wrong point.
+#
+# One bare version, first non-comment line.
+2.3.9

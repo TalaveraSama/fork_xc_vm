@@ -32,10 +32,6 @@ class UpdateCommand implements CommandInterface {
 	public function execute(array $rArgs): int {
 		set_time_limit(0);
 
-		if (empty($rArgs[0])) {
-			return 0;
-		}
-
 		register_shutdown_function(function () {
 			global $db;
 			if (is_object($db)) {
@@ -47,7 +43,19 @@ class UpdateCommand implements CommandInterface {
 		$gitRelease = new GitHubReleases(GIT_OWNER_MAIN, GIT_REPO_MAIN, SettingsManager::getAll()['update_channel']);
 		$gitRelease->setTimeout(30);
 
-		$rCommand = $rArgs[0];
+		// CommandRegistry::dispatch() slices argv from index 2, so the command
+		// name is already consumed and `console.php update` reaches this method
+		// as an empty array. execute() used to open with
+		//
+		//     if (empty($rArgs[0])) { return 0; }
+		//
+		// so the documented invocation printed nothing, changed nothing and
+		// exited 0 -- indistinguishable from a successful up-to-date check. The
+		// callers that work pass the sub-command explicitly: RootSignalsCronJob
+		// (the panel's Update button) runs `console.php update update`, and the
+		// python updater runs `console.php update post-update`. Defaulting to
+		// the main action makes the bare form do what it reads like it does.
+		$rCommand = $rArgs[0] ?? 'update';
 
 		switch ($rCommand) {
 			case 'update':
@@ -56,6 +64,22 @@ class UpdateCommand implements CommandInterface {
 				$rServerType = $rIsMain ? 'MAIN' : 'LB';
 				echo "Checking for updates (server={$rServerType}, version=" . XC_VM_VERSION . ")...\n";
 				UpdateLogger::info('Update started; server=' . $rServerType . ', current version=' . XC_VM_VERSION);
+
+				// Always ask GitHub, never the 30-minute release cache.
+				//
+				// Every caller of this action is a human saying "update me
+				// now": RootSignalsCronJob runs it for the panel's Update
+				// button, and the rest is someone typing it. Answering that
+				// from a list fetched up to half an hour ago reports "Already
+				// up to date" for a release that already exists, and no amount
+				// of retrying clears it -- the only escape is deleting the
+				// cache file by hand.
+				//
+				// The periodic checker that feeds the "update available"
+				// banner is UpdateCronJob, which builds its own client and
+				// still uses the cache, so the API rate limit stays protected
+				// where it actually matters.
+				$gitRelease->clearCache();
 
 				$rLatest = $gitRelease->getLatestVersion(
 					$rIsMain ? XC_VM_VERSION : ServerRepository::getAll()[SERVER_ID]['xc_vm_version']
@@ -177,6 +201,11 @@ class UpdateCommand implements CommandInterface {
 
 				UpdateLogger::info('Post-update completed successfully');
 				break;
+
+			default:
+				fwrite(STDERR, "Unknown sub-command: {$rCommand}\n");
+				fwrite(STDERR, "Usage: console.php update [update|post-update]\n");
+				return 1;
 		}
 
 		return 0;

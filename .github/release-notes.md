@@ -1,4 +1,4 @@
-XC_VM **2.3.9** with the **Flussonic** module built in.
+XC_VM **@@VERSION@@** with the **Flussonic** module built in.
 
 ## Install
 
@@ -15,10 +15,7 @@ The installer uses the `xc_vm.tar.gz` sitting next to it, so it deploys **this**
 tree — not upstream's. Requirements are unchanged: a clean Ubuntu 22.04+ or
 Debian 12 host, installed to `/home/xc_vm`.
 
-The archive bundles the full runtime — the PHP 8.1 build with `xcvm_core.so`
-and the ionCube loader, nginx, nginx-rtmp, redis, ffmpeg 4.0/7.1/8.0, yt-dlp
-and the MaxMind databases — so the install still completes if
-`XC_VM_Binaries` is unreachable. That is why it is larger than upstream's.
+@@RUNTIME@@
 
 Already running a panel? Use `xc_vm.tar.gz` with the in-panel updater instead of
 reinstalling.
@@ -68,6 +65,27 @@ grants for both `localhost` and `127.0.0.1`, verifies the connection and
 restarts the panel. It will ask for the MariaDB root password if it cannot get
 in by itself.
 
+## If lines download their playlist but nothing plays
+
+The panel resolves the client's country on **every** playback request, and the
+GeoLite2 database it reads is not bundled -- the installer downloads it at the
+end, non-fatally. When that download fails the install still reports success,
+playlists still generate, and not one channel plays, because the lookup used to
+throw and take the request with it.
+
+Two things changed. A missing or unreadable database now costs a country code
+instead of the whole request, and the installer says so loudly when the
+download did not land. Check and fix an affected server with:
+
+```bash
+ls -la /home/xc_vm/bin/maxmind/
+sudo /home/xc_vm/bin/php/bin/php /home/xc_vm/console.php cron:maxmind --force
+```
+
+`GeoLite2-Country.mmdb` is the one playback needs. Note that a line whose
+*forced country* is set to a real country still cannot play without the
+database -- the claim cannot be verified, so it is correctly denied.
+
 ## Uninstall
 
 The zip also carries an `uninstall`, and the install puts a copy at
@@ -87,7 +105,7 @@ lands in `/root/xc_vm-uninstall-<timestamp>/` first.
 It leaves `/etc/sysctl.conf`, the MariaDB server config and the installed
 packages alone, and says so at the end.
 
-## What's different from upstream 2.3.9
+## What's different from upstream @@UPSTREAM_VERSION@@
 
 Everything upstream ships, plus the Flussonic module — and nothing else.
 

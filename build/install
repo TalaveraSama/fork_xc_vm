@@ -482,6 +482,16 @@ BINARIES_SOURCES = [
     ("Vateron-Media", "XC_VM_Binaries"),
 ]
 
+# Where XC_VM.zip comes from when the installer was run without one beside it.
+# Same shape and same order as BINARIES_SOURCES: this fork first, upstream only
+# as a safety net. Upstream used to be hardcoded here, which meant an install
+# with no local archive silently fetched the unpatched panel -- none of the
+# fixes in this tree, and the in-panel updater pointed back at upstream.
+PANEL_SOURCES = [
+    ("TalaveraSama", "fork_xc_vm"),
+    ("Vateron-Media", "XC_VM"),
+]
+
 # Set by the database step; the final banner reports failure instead of
 # claiming success when the schema or the panel account never got created.
 DB_SETUP_OK = True
@@ -723,31 +733,45 @@ def install_distribution_binaries(dist_id, version):
     temp_tar_file = f"/tmp/{patch_name}"
     temp_extract_dir = f"/tmp/{patch_name.replace('.tar.gz', '_extract')}"
 
-    try:
-        # Always download fresh binaries from GitHub
-        printc(
-            f"Downloading {display_name} binaries from GitHub release {release_tag}...",
-            col.OKBLUE,
-        )
-        printc(f"URL: {remote_url}", col.OKBLUE)
+    # Prefer a copy sitting next to the installer, the same way the panel
+    # archive is handled above. That is what makes an offline bundle work:
+    # drop ubuntu_22.tar.gz beside `install` and nothing reaches the network.
+    local_patch = os.path.join(rPath, patch_name)
 
-        # Remove old file if exists
+    use_local = os.path.exists(local_patch) and is_valid_tar(local_patch)
+
+    if use_local:
+        printc(f"Using local {patch_name}, not downloading", col.OKGREEN)
+
         if os.path.exists(temp_tar_file):
             os.remove(temp_tar_file)
 
-        # Retry on transient network/DNS failures (e.g. resolver not ready yet).
-        last_err = None
-        for attempt in range(1, 5):
-            try:
-                urllib.request.urlretrieve(remote_url, temp_tar_file)
-                last_err = None
-                break
-            except Exception as e:
-                last_err = e
-                printc(f"Download attempt {attempt}/4 failed: {e}", col.WARNING)
-                time.sleep(5)
-        if last_err is not None:
-            raise last_err
+        shutil.copyfile(local_patch, temp_tar_file)
+
+    try:
+        if not use_local:
+            printc(
+                f"Downloading {display_name} binaries from GitHub release {release_tag}...",
+                col.OKBLUE,
+            )
+            printc(f"URL: {remote_url}", col.OKBLUE)
+
+            if os.path.exists(temp_tar_file):
+                os.remove(temp_tar_file)
+
+            # Retry on transient network/DNS failures (e.g. resolver not ready).
+            last_err = None
+            for attempt in range(1, 5):
+                try:
+                    urllib.request.urlretrieve(remote_url, temp_tar_file)
+                    last_err = None
+                    break
+                except Exception as e:
+                    last_err = e
+                    printc(f"Download attempt {attempt}/4 failed: {e}", col.WARNING)
+                    time.sleep(5)
+            if last_err is not None:
+                raise last_err
 
         if not (os.path.exists(temp_tar_file) and os.path.getsize(temp_tar_file) > 0):
             printc(f"Failed to download {display_name} binaries", col.FAIL)
@@ -1029,6 +1053,79 @@ def run_command(cmd, shell=True, capture_output=False):
         return 1, None, str(e)
 
 
+def _apt_unmet_dependencies():
+    """The packages apt currently considers broken, or [] if the state is sane.
+
+    `apt-get check` is the only thing that answers this without installing
+    anything. Its exit code alone is not enough to report on, so the offending
+    lines are kept: they name the exact packages, which is what the operator
+    has to act on.
+    """
+    ret, out, err = run_command("LC_ALL=C apt-get check 2>&1", capture_output=True)
+    if ret == 0:
+        return []
+
+    # apt indents the whole report under one heading, and the continuation
+    # lines carry the Conflicts:/Breaks: detail that says what to remove, so
+    # they are kept too rather than matching only the first line per package.
+    lines, capturing = [], False
+    for ln in ((out or "") + (err or "")).splitlines():
+        if "unmet dependencies" in ln and ln.rstrip().endswith(":"):
+            capturing = True
+            continue
+        if capturing:
+            if ln.startswith(" ") and ln.strip():
+                lines.append(ln.rstrip())
+            else:
+                capturing = False
+    return lines
+
+
+def assert_package_manager_sane(dist_info):
+    """Refuse to start if apt is already broken.
+
+    Every `apt-get install` fails while any installed package has unmet
+    dependencies, including ones this installer never asked about. Without
+    this gate the run looks like progress for several minutes -- it prompts
+    for a MariaDB root password, adds repositories, then reports all
+    thirty-eight packages as individually "failed" -- and the final message
+    blames a dead mirror, which is the wrong thing to go and fix.
+
+    Seen on a real host running Flussonic, where `flussonic-transcoder6.1.3`
+    and the older `flussonic-transcoder` were both installed and the newer
+    one declares Breaks: against the older.
+    """
+    if dist_info.get("family") != "debian":
+        return
+
+    broken = _apt_unmet_dependencies()
+    if not broken:
+        return
+
+    printc("apt reports broken dependencies; trying to repair", col.WARNING)
+    run_command("DEBIAN_FRONTEND=noninteractive apt --fix-broken install -y || true")
+    broken = _apt_unmet_dependencies()
+    if not broken:
+        printc("apt repaired itself; continuing", col.OKGREEN)
+        return
+
+    printc("CRITICAL: apt cannot install anything on this host yet", col.FAIL)
+    printc("This is not a fault in the XC_VM package -- the archive downloaded", col.WARNING)
+    printc("and unpacked fine. Packages already installed have unmet", col.WARNING)
+    printc("dependencies, and apt refuses every new install until that clears:", col.WARNING)
+    print()
+    for line in broken:
+        printc(line, col.FAIL)
+    print()
+    printc("`apt --fix-broken install` was tried and could not resolve it, which", col.WARNING)
+    printc("normally means two installed packages conflict and apt will not pick", col.WARNING)
+    printc("which one to drop. Remove the older of the conflicting pair, e.g.", col.WARNING)
+    printc("    sudo apt-get remove <the package named after 'Breaks:'>", col.OKBLUE)
+    printc("then confirm the state is clean before running this installer again:", col.WARNING)
+    printc("    sudo apt-get check && echo OK", col.OKBLUE)
+    sys.exit(1)
+
+
 def generate_self_signed_cert():
     """Generate a fresh, per-install self-signed TLS certificate for nginx.
 
@@ -1093,8 +1190,84 @@ def is_valid_tar(file_path):
         return False
 
 
+def get_latest_panel_tag(owner, repo):
+    """Newest stable panel release tag in a repository.
+
+    The fork publishes mirror releases alongside the panel -- `binaries-<tag>`
+    and `base-<version>` -- as prereleases, so `releases/latest` is not enough
+    on its own. Take the newest stable release that is not one of those.
+    """
+    try:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=100"
+        )
+        req.add_header("User-Agent", "XC_VM-Installer/1.0")
+        with urllib.request.urlopen(req, timeout=15) as response:
+            releases = json.loads(response.read().decode())
+
+        for r in releases:
+            tag = str(r.get("tag_name", ""))
+            if r.get("draft") or r.get("prerelease"):
+                continue
+            if tag.startswith("binaries-") or tag.startswith("base-"):
+                continue
+            return tag
+        return None
+    except Exception as e:
+        printc(f"No panel release from {owner}/{repo}: {e}", col.WARNING)
+        return None
+
+
+def fetch_panel_zip(owner, repo, tag):
+    """Download and verify XC_VM.zip from one source. True only if usable."""
+    url = f"https://github.com/{owner}/{repo}/releases/download/{tag}/XC_VM.zip"
+    printc(f"Downloading: {url}", col.OKBLUE)
+
+    try:
+        urllib.request.urlretrieve(url, "XC_VM.zip")
+    except Exception as e:
+        printc(f"Download error: {e}", col.FAIL)
+        return False
+
+    if not (os.path.exists("XC_VM.zip") and os.path.getsize("XC_VM.zip") > 0):
+        printc("Download failed or file is empty", col.FAIL)
+        return False
+
+    printc(
+        f"Download successful: XC_VM.zip ({os.path.getsize('XC_VM.zip')} bytes)",
+        col.OKGREEN,
+    )
+
+    # Checked against the hashes.md5 of the same release, not a fixed owner:
+    # verifying a fork download against upstream's checksum would always fail.
+    expected_hash = download_release_hash(repo, tag, "XC_VM.zip", owner)
+    if expected_hash:
+        actual_hash = compute_md5("XC_VM.zip")
+        if actual_hash != expected_hash:
+            printc(
+                f"MD5 verification failed for XC_VM.zip: expected {expected_hash}, got {actual_hash}",
+                col.FAIL,
+            )
+            os.remove("XC_VM.zip")
+            return False
+        printc("MD5 verification passed for XC_VM.zip", col.OKGREEN)
+    else:
+        printc(
+            "Warning: Could not retrieve MD5 hash for XC_VM.zip, skipping verification",
+            col.WARNING,
+        )
+
+    if is_valid_zip("XC_VM.zip"):
+        printc("ZIP archive validated successfully", col.OKGREEN)
+        return True
+
+    printc("Downloaded file is not a valid ZIP archive", col.WARNING)
+    os.remove("XC_VM.zip")
+    return False
+
+
 def download_xc_vm():
-    """Download XC_VM from GitHub releases"""
+    """Find XC_VM.zip locally, or download it preferring this fork."""
     printc("Checking for XC_VM installation files...", col.OKBLUE)
 
     # Check if valid files already exist locally
@@ -1108,73 +1281,20 @@ def download_xc_vm():
 
     printc("Not found. Trying to download from GitHub...", col.OKBLUE)
 
-    try:
-        # 1. Get latest version from GitHub API
-        printc("Getting latest version from GitHub API...", col.OKBLUE)
-        api_url = "https://api.github.com/repos/Vateron-Media/XC_VM/releases/latest"
-        req = urllib.request.Request(api_url)
-        req.add_header("User-Agent", "XC_VM-Installer/1.0")
+    for owner, repo in PANEL_SOURCES:
+        tag = get_latest_panel_tag(owner, repo)
+        if not tag:
+            printc(f"No panel release from {owner}/{repo}", col.WARNING)
+            continue
 
-        with urllib.request.urlopen(req, timeout=10) as response:
-            data = json.loads(response.read().decode())
-            latest_version = data["tag_name"]
-            printc(f"Latest version: {latest_version}", col.OKGREEN)
+        printc(f"Panel source: {owner}/{repo} @ {tag}", col.OKGREEN)
+        if fetch_panel_zip(owner, repo, tag):
+            return True
 
-        # 2. Download XC_VM.zip directly from GitHub releases
-        download_url = f"https://github.com/Vateron-Media/XC_VM/releases/download/{latest_version}/XC_VM.zip"
-        printc(f"Downloading: {download_url}", col.OKBLUE)
+        printc(f"{owner}/{repo} @ {tag} gave no usable XC_VM.zip", col.WARNING)
 
-        # Download using urllib
-        urllib.request.urlretrieve(download_url, "XC_VM.zip")
-
-        # Verify download
-        if os.path.exists("XC_VM.zip") and os.path.getsize("XC_VM.zip") > 0:
-            file_size = os.path.getsize("XC_VM.zip")
-            printc(f"Download successful: XC_VM.zip ({file_size} bytes)", col.OKGREEN)
-
-            # MD5 verification
-            expected_hash = download_release_hash("XC_VM", latest_version, "XC_VM.zip")
-            if expected_hash:
-                actual_hash = compute_md5("XC_VM.zip")
-                if actual_hash != expected_hash:
-                    printc(f"MD5 verification failed for XC_VM.zip: expected {expected_hash}, got {actual_hash}", col.FAIL)
-                    os.remove("XC_VM.zip")
-                    return False
-                printc("MD5 verification passed for XC_VM.zip", col.OKGREEN)
-            else:
-                printc("Warning: Could not retrieve MD5 hash for XC_VM.zip, skipping verification", col.WARNING)
-
-            # Validate ZIP file
-            if is_valid_zip("XC_VM.zip"):
-                printc("ZIP archive validated successfully", col.OKGREEN)
-                return True
-            else:
-                printc("Downloaded file is not a valid ZIP archive", col.WARNING)
-                os.remove("XC_VM.zip")
-                return False
-        else:
-            printc("Download failed or file is empty", col.FAIL)
-            return False
-
-    except Exception as e:
-        printc(f"Download error: {e}", col.FAIL)
-
-        # Try alternative methods if download fails
-        printc("Trying alternative download methods...", col.WARNING)
-
-        # Alternative method: Direct download from latest
-        try:
-            alt_url = "https://github.com/Vateron-Media/XC_VM/releases/latest/download/XC_VM.zip"
-            printc(f"Trying alternative: {alt_url}", col.OKBLUE)
-            urllib.request.urlretrieve(alt_url, "XC_VM.zip")
-
-            if os.path.exists("XC_VM.zip") and is_valid_zip("XC_VM.zip"):
-                printc("Alternative download successful", col.OKGREEN)
-                return True
-        except Exception:
-            pass
-
-        return False
+    printc("Could not obtain XC_VM.zip from any source", col.FAIL)
+    return False
 
 
 def install_mariadb_repo(dist_info):
@@ -2024,10 +2144,15 @@ if __name__ == "__main__":
             "XC_VM package not found or invalid. Please download manually.", col.FAIL
         )
         printc(
-            "You can download from: https://github.com/Vateron-Media/XC_VM/releases",
+            "You can download from: https://github.com/TalaveraSama/fork_xc_vm/releases",
             col.OKBLUE,
         )
         sys.exit(1)
+
+    # Before prompting for anything or touching repositories: if apt is
+    # already broken, nothing below can succeed, and finding that out after
+    # the password prompt and thirty-eight failed packages helps nobody.
+    assert_package_manager_sane(dist_info)
 
     rHost = "127.0.0.1"
     rServerID = 1
@@ -2115,8 +2240,22 @@ if __name__ == "__main__":
         run_command("systemctl stop apache2 nginx 2>/dev/null || true")
         run_command("systemctl disable apache2 nginx 2>/dev/null || true")
 
-        # Remove conflicting packages
-        for rPackage in rRemove:
+        # Remove conflicting packages. The plain names are only half of it:
+        # Ubuntu ships MySQL as mysql-server-8.0 / mysql-client-8.0 and their
+        # -core variants, so removing "mysql-server" reports "not installed,
+        # so not removed" and leaves in place exactly the packages MariaDB
+        # Conflicts: with -- which is what made mariadb-server uninstallable
+        # on a host that already had MySQL 8.0.
+        conflicting = list(rRemove)
+        ret, out, _ = run_command(
+            "dpkg-query -W -f='${Package} ${Status}\n' 'mysql-server*' 'mysql-client*' "
+            "2>/dev/null | awk '$4 == \"installed\" {print $1}'",
+            capture_output=True,
+        )
+        if ret == 0 and out:
+            conflicting += [n for n in out.split() if n not in conflicting]
+
+        for rPackage in conflicting:
             printc(f"Removing {rPackage}", col.OKBLUE)
             run_command(f"apt-get remove {rPackage} -y")
 
@@ -2135,6 +2274,21 @@ if __name__ == "__main__":
             )
             if ret2 != 0:
                 printc("CRITICAL: Could not install MariaDB!", col.FAIL)
+
+                # Two very different causes used to share one message, and the
+                # dead-mirror advice sends the operator to the wrong file when
+                # the real problem is a dependency conflict. Ask apt which it is.
+                broken = _apt_unmet_dependencies()
+                if broken:
+                    printc("apt has unmet dependencies and refuses every install:", col.WARNING)
+                    print()
+                    for line in broken:
+                        printc(line, col.FAIL)
+                    print()
+                    printc("Clear that first -- usually by removing the older of the two", col.WARNING)
+                    printc("conflicting packages -- then run this installer again.", col.WARNING)
+                    sys.exit(1)
+
                 printc("apt cannot fetch the MariaDB packages it is being offered.", col.WARNING)
                 printc("Usually a third-party mirror in /etc/apt/sources.list.d/ that no", col.WARNING)
                 printc("longer exists: apt keeps its stale index and prefers a version it", col.WARNING)
@@ -2302,6 +2456,39 @@ if __name__ == "__main__":
             f"No patches available for {dist_id} {version}, using default binaries",
             col.OKBLUE,
         )
+
+    # "using default binaries" is inherited from when the release archive
+    # carried a complete bin/. It now ships upstream's skeleton and the
+    # interpreters arrive with the per-distribution tarball, so on a
+    # distribution that has no tarball those branches are followed by a tree
+    # with no php and no nginx -- and the installer would carry on and print a
+    # success banner over a panel that can never start. Whichever branch ran,
+    # the runtime has to be here before going any further.
+    runtime_required = [
+        "bin/php/bin/php",
+        "bin/nginx/sbin/nginx",
+        "bin/nginx_rtmp/sbin/nginx_rtmp",
+    ]
+    runtime_absent = [
+        p for p in runtime_required if not os.path.exists(os.path.join("/home/xc_vm", p))
+    ]
+    if runtime_absent:
+        printc(
+            f"FATAL: {dist_id} {version} has no runtime — missing "
+            + ", ".join(runtime_absent),
+            col.FAIL,
+        )
+        printc(
+            "The release archive ships upstream's bin/ skeleton; the PHP and "
+            "nginx builds are downloaded during the install, per distribution. "
+            "None is published for this one, so the panel would never start.",
+            col.FAIL,
+        )
+        printc(
+            "Supported: Ubuntu 20/22/24 and Debian 11/12/13.",
+            col.FAIL,
+        )
+        sys.exit(1)
 
     ##################################################
     # MariaDB CONFIGURATION                          #
@@ -2700,6 +2887,13 @@ if __name__ == "__main__":
         run_command(
             f"/home/xc_vm/bin/php/bin/php {startup_cmd} cron:maxmind --force"
         )
+        # Say so if it did not land. Playback resolves the client country on
+        # every request, so an install that skips this looks complete, serves
+        # playlists, and plays nothing.
+        if not os.path.exists("/home/xc_vm/bin/maxmind/GeoLite2-Country.mmdb"):
+            printc("WARNING: GeoLite2 database not downloaded.", col.WARNING)
+            printc("Re-run once the server has network:", col.WARNING)
+            printc("  console.php cron:maxmind --force", col.WARNING)
 
     # Download the proxy-node archive (proxy.tar.gz). Like GeoLite2 it is no longer
     # bundled in the release archive — fetch it from the XC_VM_Proxy release on

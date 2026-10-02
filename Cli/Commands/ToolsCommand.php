@@ -43,7 +43,7 @@ class ToolsCommand implements CommandInterface {
 		$rMethod = (!empty($rArgs[0]) ? $rArgs[0] : null);
 		$rUser = posix_getpwuid(posix_geteuid())['name'];
 
-		$rRootMethods = array('rescue', 'recaptcha', 'access', 'ports', 'migration', 'user', 'mysql', 'database', 'flush');
+		$rRootMethods = array('rescue', 'recaptcha', 'access', 'ports', 'migration', 'user', 'mysql', 'database', 'flush', 'import');
 		$rUserMethods = array('images', 'duplicates', 'bouquets');
 
 		// No or unknown subcommand → show the full help to any user (root or xc_vm)
@@ -78,6 +78,8 @@ class ToolsCommand implements CommandInterface {
 					return $this->processMysql($db, $rServers);
 				case 'database':
 					return $this->processDatabase($db, $rArgs);
+				case 'import':
+					return $this->processImport($db, $rArgs);
 				case 'flush':
 					return $this->processFlush($db);
 			}
@@ -198,6 +200,167 @@ class ToolsCommand implements CommandInterface {
 		return 0;
 	}
 
+	/**
+	 * Migrate what fits from another Xtream-derived panel's dump.
+	 *
+	 * XUI.ONE, Xtream UI and this panel share an ancestor, so the table names
+	 * line up and the columns mostly do not: each fork grew its own over the
+	 * years. Restoring such a dump straight over the live database is what
+	 * makes people say "the backup does not work". This stages it in a
+	 * separate database, intersects the columns table by table, and copies
+	 * only what both sides agree on.
+	 *
+	 * Reports and changes nothing unless --apply is given. `servers` is never
+	 * touched: those rows describe the machines of the installation the dump
+	 * came from. `lines` needs --lines on top of --apply, because a password
+	 * format that does not match locks every customer out.
+	 *
+	 * @param object $db    Database handle.
+	 * @param array  $rArgs Raw argv for this subcommand.
+	 * @return int
+	 */
+	private function processImport($db, array $rArgs): int {
+		$rFile  = isset($rArgs[1]) ? (string) $rArgs[1] : '';
+		$rApply = in_array('--apply', $rArgs, true);
+		$rLines = in_array('--lines', $rArgs, true);
+		$rStage = 'xc_vm_import';
+
+		if ($rFile === '' || !is_file($rFile)) {
+			echo "Usage: console.php tools import <dump.sql> [--apply] [--lines]\n";
+			echo "The file must exist and be readable.\n";
+			return 1;
+		}
+
+		echo "Staging " . $rFile . " into `" . $rStage . "`...\n";
+		$db->query('DROP DATABASE IF EXISTS `' . $rStage . '`;');
+		$db->query('CREATE DATABASE `' . $rStage . '`;');
+
+		// Shelling out to the client is deliberate: a dump is a stream of
+		// statements, not something to re-implement a parser for.
+		$rCmd = 'mysql ' . escapeshellarg($rStage) . ' < ' . escapeshellarg($rFile) . ' 2>&1';
+		$rOut = (string) shell_exec($rCmd);
+
+		if (trim($rOut) !== '') {
+			echo "mysql said:\n" . substr($rOut, 0, 600) . "\n";
+		}
+
+		// Order matters: categories before the streams that reference them.
+		$rTables = array('streams_categories', 'streams', 'bouquets');
+
+		if ($rLines) {
+			$rTables[] = 'lines';
+		}
+
+		$rTotal = 0;
+
+		foreach ($rTables as $rTable) {
+			$rCommon = $this->commonColumns($db, $rStage, $rTable);
+
+			if (empty($rCommon)) {
+				echo "\n" . $rTable . ": not present on both sides, skipped\n";
+				continue;
+			}
+
+			$db->query('SELECT COUNT(*) AS `n` FROM `' . $rStage . '`.`' . $rTable . '`;');
+			$rRows = $db->num_rows() > 0 ? (int) $db->get_row()['n'] : 0;
+
+			$rDropped = $this->foreignOnlyColumns($db, $rStage, $rTable);
+
+			echo "\n" . $rTable . ": " . $rRows . " row(s), "
+				. count($rCommon) . " column(s) in common";
+			echo empty($rDropped) ? "\n" : (", dropping " . count($rDropped) . ": "
+				. implode(', ', array_slice($rDropped, 0, 8))
+				. (count($rDropped) > 8 ? ' …' : '') . "\n");
+
+			if (!$rApply) {
+				continue;
+			}
+
+			$rCols = '`' . implode('`, `', $rCommon) . '`';
+			$db->query(
+				'INSERT INTO `' . $rTable . '` (' . $rCols . ') '
+				. 'SELECT ' . $rCols . ' FROM `' . $rStage . '`.`' . $rTable . '`;'
+			);
+
+			echo "  imported\n";
+			$rTotal += $rRows;
+		}
+
+		echo "\n";
+
+		if (!$rApply) {
+			echo "Nothing was written. Re-run with --apply to import.\n";
+			echo "`servers` is never imported; `lines` needs --lines as well.\n";
+			return 0;
+		}
+
+		echo "Imported roughly " . $rTotal . " row(s). Staging database `"
+			. $rStage . "` kept for inspection; drop it when satisfied.\n";
+
+		return 0;
+	}
+
+	/**
+	 * Columns a table has in both the staged dump and the live database.
+	 *
+	 * @param object $db     Database handle.
+	 * @param string $rStage Staging database name.
+	 * @param string $rTable Table name.
+	 * @return string[]
+	 */
+	private function commonColumns($db, $rStage, $rTable): array {
+		$db->query(
+			'SELECT a.`COLUMN_NAME` AS `c`
+			 FROM `information_schema`.`COLUMNS` a
+			 INNER JOIN `information_schema`.`COLUMNS` b
+			     ON b.`TABLE_SCHEMA` = ? AND b.`TABLE_NAME` = a.`TABLE_NAME`
+			    AND b.`COLUMN_NAME` = a.`COLUMN_NAME`
+			 WHERE a.`TABLE_SCHEMA` = DATABASE() AND a.`TABLE_NAME` = ?
+			 ORDER BY a.`ORDINAL_POSITION`;',
+			$rStage,
+			$rTable
+		);
+
+		$rOut = array();
+
+		foreach (($db->num_rows() > 0 ? $db->get_rows() : array()) as $rRow) {
+			$rOut[] = (string) $rRow['c'];
+		}
+
+		return $rOut;
+	}
+
+	/**
+	 * Columns the dump has that this panel does not, so they can be named.
+	 *
+	 * @param object $db     Database handle.
+	 * @param string $rStage Staging database name.
+	 * @param string $rTable Table name.
+	 * @return string[]
+	 */
+	private function foreignOnlyColumns($db, $rStage, $rTable): array {
+		$db->query(
+			'SELECT `COLUMN_NAME` AS `c` FROM `information_schema`.`COLUMNS`
+			 WHERE `TABLE_SCHEMA` = ? AND `TABLE_NAME` = ?
+			   AND `COLUMN_NAME` NOT IN (
+			       SELECT `COLUMN_NAME` FROM `information_schema`.`COLUMNS`
+			       WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ?
+			   )
+			 ORDER BY `ORDINAL_POSITION`;',
+			$rStage,
+			$rTable,
+			$rTable
+		);
+
+		$rOut = array();
+
+		foreach (($db->num_rows() > 0 ? $db->get_rows() : array()) as $rRow) {
+			$rOut[] = (string) $rRow['c'];
+		}
+
+		return $rOut;
+	}
+
 	private function printUsage(): void {
 		echo "Usage: console.php tools <subcommand>\n\n";
 		echo "Subcommands (run as xc_vm):\n";
@@ -214,6 +377,9 @@ class ToolsCommand implements CommandInterface {
 		echo "  mysql       Reauthorise load balancers on MySQL\n";
 		echo "  database    Restore blank \XC_VM database (requires --confirm)\n";
 		echo "  flush       Flush all blocked IPs (iptables + database)\n";
+		echo "  import      Analyse a foreign panel dump, and migrate what fits\n";
+		echo "              console.php tools import /root/xui.sql           (report only)\n";
+		echo "              console.php tools import /root/xui.sql --apply   (write)\n";
 	}
 
 	private function processRecaptcha($db): int {
