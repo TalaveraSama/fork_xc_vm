@@ -83,11 +83,16 @@ systemctl daemon-reload
 ```sh
 mysql -u root -p -e "DROP DATABASE IF EXISTS xc_vm; DROP DATABASE IF EXISTS xc_vm_migrate;"
 mysql -u root -p -e "DROP DATABASE IF EXISTS xc_vm_import;"   # only if tools import was used
-mysql -u root -p -e "SELECT user, host FROM mysql.user WHERE user LIKE '%xc%';"
+mysql -u root -p -e \
+  "SELECT DISTINCT user, host FROM mysql.db WHERE db IN ('xc_vm','xc_vm_migrate');"
 ```
 
-The installer generates a random MariaDB account name, so that last query is
-how you find it. Drop it with `DROP USER 'thatname'@'localhost';`.
+The installer generates the MariaDB account name with
+`generate_random_password(32)`, so it is a 32-character random string and
+**searching for 'xc' in the username finds nothing**. Look it up by its
+grants instead, as above, then `DROP USER 'thatname'@'localhost';`.
+
+Run that query *before* dropping the databases — the grants go with them.
 
 **Do not purge MariaDB itself** unless you are certain nothing else uses it.
 

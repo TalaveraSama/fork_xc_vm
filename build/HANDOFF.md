@@ -2555,3 +2555,18 @@ seeing a guard fire twice is to disable it, and the guard was the only reason
 five JavaScript files were not quietly mangled while nobody was looking. The
 fix was to assert the real invariant — balanced braces, and exactly one more
 opening brace per handler — rather than a hand-counted delta.
+
+## Correction in UNINSTALL.md: finding the MariaDB account
+
+The first draft suggested `SELECT user FROM mysql.user WHERE user LIKE '%xc%'`
+to locate the account the installer created. That finds nothing: the name
+comes from `generate_random_password(32)` and is 32 random characters with no
+relation to the panel.
+
+It is found by its grants:
+
+    SELECT DISTINCT user, host FROM mysql.db WHERE db IN ('xc_vm','xc_vm_migrate');
+
+And it must be run **before** dropping the databases, since the grants are
+dropped with them — after which the account is orphaned and unfindable
+without guessing.
