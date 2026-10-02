@@ -8,7 +8,7 @@ use XcVm\Core\Http\ApiClient;
 use XcVm\Core\Util\AdminHelpers;
 use XcVm\Domain\Server\ServerRepository;
 use XcVm\Domain\Stream\StreamRepository;
-use XcVm\Module\Tmdb\TmdbApiService;
+use XcVm\Infrastructure\Tmdb\TmdbApiService;
 
 /**
  * WatchService — watch service

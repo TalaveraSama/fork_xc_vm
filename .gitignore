@@ -10,3 +10,7 @@ tmp/logs/
 tmp/crontab
 tmp/*.log
 tmp/logs/
+
+# Python bytecode from the build scripts run in-place
+__pycache__/
+*.pyc

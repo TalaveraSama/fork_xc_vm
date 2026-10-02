@@ -141,6 +141,10 @@
 						toast('Logs have been cleared.');
 						bootstrap.Modal.getOrCreateInstance(document.getElementById('clearLogsModal')).hide();
 						table.ajax.reload(null, false);
+					}).fail(function (rXHR) {
+					    // Silent before: no toast, no console entry, so a 502 or an
+					    // expired session looked like a button that does nothing.
+					    window.xcToast("Request failed (" + rXHR.status + "). Check the panel log.", "error");
 					});
 				});
 			});

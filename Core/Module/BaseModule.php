@@ -93,6 +93,20 @@ abstract class BaseModule implements ModuleInterface, MigratableInterface, CronP
     public function uninstall(): void {}
 
     /**
+     * Called when the panel's services are being stopped.
+     *
+     * A module that starts long-lived processes has to be told, because it
+     * cannot find out any other way. The DVB module detaches dvblast and
+     * tsdecrypt with setsid so they survive the cron run that launched them,
+     * which is correct and also means nothing reaps them when the panel goes
+     * down: they keep a tuner open until somebody notices and kills them by
+     * hand. Modules that start nothing can ignore this.
+     *
+     * @return void
+     */
+    public function shutdown(): void {}
+
+    /**
      * Database migrations provided by the module. Empty by default.
      *
      * @return array Migration descriptors.

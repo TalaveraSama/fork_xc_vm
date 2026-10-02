@@ -76,6 +76,8 @@ class ProxyInstallFlow {
 	}
 
 	public static function runStartup($rConn, callable $rRunSSH): void {
-		call_user_func($rRunSSH, $rConn, 'sudo -u xc_vm ' . PHP_BIN . ' ' . MAIN_HOME . 'console.php startup');
+		// As root -- see the note in LbInstallFlow: xc_vm cannot sudo without a
+		// password, so startup run as xc_vm never manages to write the crontab.
+		call_user_func($rRunSSH, $rConn, 'sudo ' . PHP_BIN . ' ' . MAIN_HOME . 'console.php startup');
 	}
 }

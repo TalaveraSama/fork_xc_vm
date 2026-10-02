@@ -43,7 +43,7 @@ class ToolsCommand implements CommandInterface {
 		$rMethod = (!empty($rArgs[0]) ? $rArgs[0] : null);
 		$rUser = posix_getpwuid(posix_geteuid())['name'];
 
-		$rRootMethods = array('rescue', 'recaptcha', 'access', 'ports', 'migration', 'user', 'mysql', 'database', 'flush');
+		$rRootMethods = array('rescue', 'recaptcha', 'access', 'ports', 'migration', 'user', 'mysql', 'database', 'flush', 'import');
 		$rUserMethods = array('images', 'duplicates', 'bouquets');
 
 		// No or unknown subcommand → show the full help to any user (root or xc_vm)
@@ -78,6 +78,8 @@ class ToolsCommand implements CommandInterface {
 					return $this->processMysql($db, $rServers);
 				case 'database':
 					return $this->processDatabase($db, $rArgs);
+				case 'import':
+					return $this->processImport($db, $rArgs);
 				case 'flush':
 					return $this->processFlush($db);
 			}
@@ -198,6 +200,640 @@ class ToolsCommand implements CommandInterface {
 		return 0;
 	}
 
+	/**
+	 * Migrate what fits from another Xtream-derived panel's dump.
+	 *
+	 * XUI.ONE, Xtream UI and this panel share an ancestor, so the table names
+	 * line up and the columns mostly do not: each fork grew its own over the
+	 * years. Restoring such a dump straight over the live database is what
+	 * makes people say "the backup does not work". This stages it in a
+	 * separate database, intersects the columns table by table, and copies
+	 * only what both sides agree on.
+	 *
+	 * Reports and changes nothing unless --apply is given. `servers` is never
+	 * touched: those rows describe the machines of the installation the dump
+	 * came from. `lines` needs --lines on top of --apply, because a password
+	 * format that does not match locks every customer out.
+	 *
+	 * Into a table that already has rows, the copy comes in under fresh ids
+	 * -- the dump's own would collide -- and every number that points at a
+	 * copied row is then rewritten from the map built while inserting: the
+	 * `category_id` list of streams, the four id lists of bouquets, the
+	 * `bouquet` list of lines, and the `parent_id`, `member_id` and `pair_id`
+	 * scalars. An id whose row did not import is dropped rather than left to
+	 * name some unrelated row of this panel. `bouquet_series` is emptied
+	 * either way: its numbers belong to the dump's `streams_series`, which
+	 * this tool never imports, so nothing here can resolve them. Into an
+	 * empty table the dump keeps its own ids, which need no rewriting.
+	 *
+	 * @param object $db    Database handle.
+	 * @param array  $rArgs Raw argv for this subcommand.
+	 * @return int
+	 */
+	private function processImport($db, array $rArgs): int {
+		$rFile  = isset($rArgs[1]) ? (string) $rArgs[1] : '';
+		$rApply = in_array('--apply', $rArgs, true);
+		$rLines = in_array('--lines', $rArgs, true);
+		$rStage = 'xc_vm_import';
+
+		if ($rFile === '' || !is_file($rFile)) {
+			echo "Usage: console.php tools import <dump.sql> [--apply] [--lines]\n";
+			echo "The file must exist and be readable.\n";
+			return 1;
+		}
+
+		echo "Staging " . $rFile . " into `" . $rStage . "`...\n";
+		$db->query('DROP DATABASE IF EXISTS `' . $rStage . '`;');
+		$db->query('CREATE DATABASE `' . $rStage . '`;');
+
+		// Shelling out to the client is deliberate: a dump is a stream of
+		// statements, not something to re-implement a parser for.
+		$rCmd = 'mysql ' . escapeshellarg($rStage) . ' < ' . escapeshellarg($rFile) . ' 2>&1';
+		$rOut = (string) shell_exec($rCmd);
+
+		if (trim($rOut) !== '') {
+			echo "mysql said:\n" . substr($rOut, 0, 600) . "\n";
+		}
+
+		// Order matters: categories before the streams that reference them,
+		// streams before the bouquets that list them, bouquets before the
+		// lines that attach them.
+		$rTables = array('streams_categories', 'streams', 'bouquets');
+
+		if ($rLines) {
+			$rTables[] = 'lines';
+		}
+
+		// Columns holding a JSON list of ids from another table, mapped to
+		// the table those ids are rows of. A null target means the numbers
+		// belong to a table no import can bring over, so the list cannot be
+		// resolved -- only emptied.
+		$rLists = array(
+			'streams'  => array('category_id' => 'streams_categories'),
+			'bouquets' => array(
+				'bouquet_channels' => 'streams',
+				'bouquet_movies'   => 'streams',
+				'bouquet_radios'   => 'streams',
+				'bouquet_series'   => null,
+			),
+			'lines'    => array('bouquet' => 'bouquets'),
+		);
+
+		// Scalar columns that hold one id from another table. Self-references
+		// included: a category's parent or a reseller's customer may sit at
+		// either side of the row, so every one of these is settled in a
+		// second pass over the staged ids.
+		$rScalars = array(
+			'streams_categories' => array('parent_id' => 'streams_categories'),
+			'lines'              => array('member_id' => 'lines', 'pair_id' => 'lines'),
+		);
+
+		$rMaps       = array(); // table => dump id => live id (identity where kept)
+		$rRenumbered = array(); // table => true when the live ids are new ones
+		$rCommons    = array(); // table => columns both sides agreed on
+		$rDead       = array(); // table => the whole copy of it was refused
+		$rTotal      = 0;
+		$rFailures   = 0;
+
+		if ($rApply) {
+			// One transaction for the whole import: a crash rolls back, and
+			// the reference pass never sees rows from half a table.
+			$db->query('START TRANSACTION;');
+		}
+
+		foreach ($rTables as $rTable) {
+			$rCommon = $this->commonColumns($db, $rStage, $rTable);
+
+			if (empty($rCommon)) {
+				echo "\n" . $rTable . ": not present on both sides, skipped\n";
+				continue;
+			}
+
+			$rCommons[$rTable] = $rCommon;
+
+			$rRows = 0;
+
+			if ($db->query('SELECT COUNT(*) AS `n` FROM `' . $rStage . '`.`' . $rTable . '`;')
+				&& $db->num_rows() > 0) {
+				$rRows = (int) $db->get_row()['n'];
+			}
+
+			$rLive = 0;
+
+			if ($db->query('SELECT COUNT(*) AS `n` FROM `' . $rTable . '`;')
+				&& $db->num_rows() > 0) {
+				$rLive = (int) $db->get_row()['n'];
+			}
+
+			$rDropped = $this->foreignOnlyColumns($db, $rStage, $rTable);
+
+			echo "\n" . $rTable . ": " . $rRows . " row(s), "
+				. count($rCommon) . " column(s) in common";
+			echo empty($rDropped) ? "\n" : (", dropping " . count($rDropped) . ": "
+				. implode(', ', array_slice($rDropped, 0, 8))
+				. (count($rDropped) > 8 ? ' …' : '') . "\n");
+
+			if ($rRows === 0) {
+				echo "  nothing staged, nothing to copy\n";
+				continue;
+			}
+
+			$rHasID = in_array('id', $rCommon, true);
+
+			// The map machinery needs ids that survive a trip through PHP as
+			// plain integers; a dump keyed on uuids gets bulk-copied instead.
+			if ($rHasID) {
+				$rProbe = null;
+
+				if ($db->query('SELECT `id` FROM `' . $rStage . '`.`' . $rTable . '` ORDER BY `id` ASC LIMIT 1;')
+					&& $db->num_rows() > 0) {
+					$rProbe = $db->get_row()['id'];
+				}
+
+				if ((string) (int) $rProbe !== (string) $rProbe) {
+					$rHasID = false;
+					echo "  the id column is not numeric, so references cannot be remapped\n";
+				}
+			}
+
+			$rKeep  = $rLive === 0 && $rHasID;
+
+			if (!$rApply) {
+				echo $rKeep ? "  report only: rows would keep the ids the dump uses\n" : ($rHasID
+					? "  report only: rows would be renumbered, and ids pointing into this table rewritten\n"
+					: "  report only: no id column, so rows would be copied as they stand\n");
+				continue;
+			}
+
+			if ($rKeep || !$rHasID) {
+				$rCols = '`' . implode('`, `', $rCommon) . '`';
+
+				if (!$db->query('INSERT INTO `' . $rTable . '` (' . $rCols . ') '
+					. 'SELECT ' . $rCols . ' FROM `' . $rStage . '`.`' . $rTable . '`;')) {
+					echo "  ! the copy was refused: " . $db->error() . "\n";
+					$rDead[$rTable] = true;
+					$rFailures += $rRows;
+					continue;
+				}
+
+				$rTotal += $rRows;
+
+				if ($rKeep) {
+					$rMaps[$rTable] = $this->identityMap($db, $rStage, $rTable);
+					echo "  imported " . $rRows . " row(s) with the dump's own ids\n";
+				} else {
+					echo "  copied " . $rRows . " row(s); without an id column there is no map to"
+						. " build, so references to and from this table keep the dump's numbering\n";
+				}
+
+				continue;
+			}
+
+			// Every common column but the id itself: the id is what the panel
+			// assigns, and the reference columns go in with the dump's values
+			// and get corrected in the pass below -- one insert per row, and
+			// the values never round-trip through PHP.
+			$rInsert = array();
+
+			foreach ($rCommon as $rCol) {
+				if ($rCol !== 'id') {
+					$rInsert[] = '`' . $rCol . '`';
+				}
+			}
+
+			$rInsert = implode(', ', $rInsert);
+			$rCopied = 0;
+			$rFailed = 0;
+			$rLastID = PHP_INT_MIN; // a dump may key rows on 0, or below it
+			$rMaps[$rTable] = array();
+			$rRenumbered[$rTable] = true;
+
+			while (true) {
+				if (!$db->query('SELECT `id` FROM `' . $rStage . '`.`' . $rTable . '`'
+					. ' WHERE `id` > ' . $rLastID . ' ORDER BY `id` ASC LIMIT 1000;')) {
+					echo "  ! the staged rows could not be read: " . $db->error() . "\n";
+					break;
+				}
+
+				$rPage = $db->get_rows();
+
+				if (empty($rPage)) {
+					break;
+				}
+
+				foreach ($rPage as $rRow) {
+					$rLastID = (int) $rRow['id'];
+
+					if (!$db->query('INSERT INTO `' . $rTable . '` (' . $rInsert . ') '
+						. 'SELECT ' . $rInsert . ' FROM `' . $rStage . '`.`' . $rTable . '`'
+						. ' WHERE `id` = ?;', $rLastID)) {
+						if ($rFailed === 0) {
+							echo "  ! first row refused: " . $db->error() . "\n";
+						}
+						$rFailed++;
+						continue;
+					}
+
+					$rMaps[$rTable][$rLastID] = (int) $db->last_insert_id();
+					$rCopied++;
+				}
+
+				if (count($rPage) < 1000) {
+					break;
+				}
+			}
+
+			$rTotal += $rCopied;
+
+			echo "  imported " . $rCopied . " row(s) under new ids\n";
+
+			if ($rFailed > 0) {
+				echo "  ! " . $rFailed . " row(s) were refused -- duplicate names are the usual cause\n";
+				$rFailures += $rFailed;
+			}
+
+			// Nothing at all coming in is a whole-table failure whatever the
+			// route: references into it are then left alone and named, exactly
+			// as a refused bulk copy leaves them.
+			if ($rCopied === 0) {
+				$rDead[$rTable] = true;
+			}
+		}
+
+		if ($rApply && $rTotal > 0) {
+			$rRepair = $this->repairImportReferences($db, $rStage, $rTables, $rMaps,
+				$rRenumbered, $rDead, $rCommons, $rLists, $rScalars);
+
+			if ($rRepair[0] > 0 || $rRepair[1] > 0) {
+				echo "\nReferences: " . $rRepair[0] . " id(s) rewritten to the numbering assigned"
+					. " above, " . $rRepair[1] . " dropped for pointing at nothing imported\n";
+			}
+
+			$rFailures += $rRepair[2];
+		}
+
+		if ($rApply) {
+			// Refused rows are named and counted rather than aborting the
+			// import: the rest came in fine, and a whole panel rejected over
+			// two duplicate bouquet names is the worse outcome. Nothing at all
+			// coming in is the one case worth unwinding.
+			$db->query($rFailures > 0 && $rTotal === 0 ? 'ROLLBACK;' : 'COMMIT;');
+		}
+
+		echo "\n";
+
+		if (!$rApply) {
+			echo "Nothing was written. Re-run with --apply to import.\n";
+			echo "`servers` is never imported; `lines` needs --lines as well.\n";
+			return 0;
+		}
+
+		echo "Imported roughly " . $rTotal . " row(s). Staging database `"
+			. $rStage . "` kept for inspection; drop it when satisfied.\n";
+
+		if ($rFailures > 0) {
+			echo $rFailures . " row(s) were refused; the reasons are printed above and in the panel log.\n";
+			echo "This import is one-shot: re-running --apply would duplicate what came in, not\n";
+			echo "top it up. Clear what arrived, or point the import at a fresh panel.\n";
+			return 1;
+		}
+
+		return 0;
+	}
+
+	/**
+	 * Rewrite the id references a renumbered import leaves pointing at the
+	 * wrong rows.
+	 *
+	 * Every id whose row did not import is dropped rather than kept: a
+	 * bouquet naming the wrong channel is the exact failure this pass exists
+	 * to prevent, while an id naming no channel at all is merely missing.
+	 * References into a table whose rows were refused wholesale are left
+	 * alone, the refusal said out loud -- zeroing them would add a second
+	 * silent loss on top of one already reported.
+	 *
+	 * Rows are updated only where the rewrite actually changes something, so
+	 * a panel that happened to assign the same numbers costs no queries.
+	 *
+	 * @return array{int, int, int} [ids rewritten, ids dropped, updates refused]
+	 */
+	private function repairImportReferences($db, string $rStage, array $rTables, array $rMaps,
+		array $rRenumbered, array $rDead, array $rCommons, array $rLists, array $rScalars): array {
+
+		$rFixed  = 0;
+		$rGone   = 0;
+		$rFailed = 0;
+
+		foreach ($rTables as $rTable) {
+			if (empty($rMaps[$rTable])) {
+				continue;
+			}
+
+			$rRefs = array();
+
+			// A reference column only matters where both sides have it: the
+			// copy above wrote from the same intersection, and asking for a
+			// column the panel lacks would fail the read of every page.
+			foreach ($rLists[$rTable] ?? array() as $rCol => $rRef) {
+				if (in_array($rCol, $rCommons[$rTable] ?? array(), true)) {
+					$rRefs[$rCol] = array($rRef, true);
+				}
+			}
+
+			foreach ($rScalars[$rTable] ?? array() as $rCol => $rRef) {
+				if (in_array($rCol, $rCommons[$rTable] ?? array(), true)) {
+					$rRefs[$rCol] = array($rRef, false);
+				}
+			}
+
+			$rActive = array();
+
+			foreach ($rRefs as $rCol => $rDef) {
+				$rRef    = $rDef[0];
+				$rIsList = $rDef[1];
+
+				if ($rRef === null) {
+					// A table no import can bring over: the empty map drops
+					// every id in the list, which is the whole point.
+					$rActive[$rCol] = array(array(), $rIsList);
+					continue;
+				}
+
+				if ($rRef === $rTable) {
+					if (empty($rRenumbered[$rTable])) {
+						continue; // own ids were kept, so they are already right
+					}
+					$rActive[$rCol] = array($rMaps[$rTable], $rIsList);
+					continue;
+				}
+
+				if (!empty($rDead[$rRef])) {
+					echo "  " . $rCol . ": left as it is -- the copy of `" . $rRef . "` failed\n";
+					continue;
+				}
+
+				if (!empty($rMaps[$rRef]) && empty($rRenumbered[$rRef])) {
+					continue; // the reference table kept the dump's ids
+				}
+
+				// Renumbered: remap through its map. Not imported at all: the
+				// empty map drops every id, because the numbers can only
+				// point at rows of this panel the dump never knew.
+				$rActive[$rCol] = array($rMaps[$rRef] ?? array(), $rIsList);
+			}
+
+			if (empty($rActive)) {
+				continue;
+			}
+
+			$rSelect = '`id`, `' . implode('`, `', array_keys($rActive)) . '`';
+			$rLastID = PHP_INT_MIN;
+
+			while (true) {
+				if (!$db->query('SELECT ' . $rSelect . ' FROM `' . $rStage . '`.`' . $rTable . '`'
+					. ' WHERE `id` > ' . $rLastID . ' ORDER BY `id` ASC LIMIT 1000;')) {
+					echo "  ! the staged rows could not be read: " . $db->error() . "\n";
+					break;
+				}
+
+				$rPage = $db->get_rows();
+
+				if (empty($rPage)) {
+					break;
+				}
+
+				foreach ($rPage as $rRow) {
+					$rLastID = (int) $rRow['id'];
+					$rLiveID = (int) ($rMaps[$rTable][$rLastID] ?? 0);
+
+					if ($rLiveID === 0) {
+						continue; // that row was refused; there is nothing to fix
+					}
+
+					$rSets  = array();
+					$rBinds = array();
+
+					foreach ($rActive as $rCol => $rDef) {
+						$rMap    = $rDef[0];
+						$rIsList = $rDef[1];
+						$rRaw    = $rRow[$rCol] ?? '';
+
+						if ($rIsList) {
+							$rMapped = 0;
+							$rLost   = 0;
+							$rNew    = $this->remapIDList((string) $rRaw, $rMap, $rMapped, $rLost);
+
+							if ($rNew !== '[' . implode(',', $this->idList($rRaw)) . ']') {
+								$rSets[] = '`' . $rCol . '` = ?';
+								$rBinds[] = $rNew;
+							}
+
+							$rFixed += $rMapped;
+							$rGone  += $rLost;
+							continue;
+						}
+
+						$rOld = (int) $rRaw;
+
+						if ($rOld <= 0) {
+							continue;
+						}
+
+						if (isset($rMap[$rOld])) {
+							if ((int) $rMap[$rOld] === $rOld) {
+								continue; // the new id happens to be the old one
+							}
+							$rSets[] = '`' . $rCol . '` = ?';
+							$rBinds[] = (int) $rMap[$rOld];
+							$rFixed++;
+						} else {
+							$rSets[] = '`' . $rCol . '` = 0';
+							$rGone++;
+						}
+					}
+
+					if (empty($rSets)) {
+						continue;
+					}
+
+					$rArgs = array_merge(
+						array('UPDATE `' . $rTable . '` SET ' . implode(', ', $rSets) . ' WHERE `id` = ?;'),
+						$rBinds,
+						array($rLiveID)
+					);
+
+					if (!call_user_func_array(array($db, 'query'), $rArgs)) {
+						if ($rFailed === 0) {
+							echo "  ! a reference update was refused: " . $db->error() . "\n";
+						}
+						$rFailed++;
+					}
+				}
+
+				if (count($rPage) < 1000) {
+					break;
+				}
+			}
+		}
+
+		return array($rFixed, $rGone, $rFailed);
+	}
+
+	/**
+	 * dump id => the same id, for a table copied with the numbering it came
+	 * with. The live row of a dump id is then the id itself, which is all the
+	 * reference pass needs; building it costs one read per 5000 rows.
+	 *
+	 * @param object $db     Database handle.
+	 * @param string $rStage Staging database name.
+	 * @param string $rTable Table name.
+	 * @return array<int, int>
+	 */
+	private function identityMap($db, string $rStage, string $rTable): array {
+		$rMap    = array();
+		$rLastID = PHP_INT_MIN;
+
+		while (true) {
+			if (!$db->query('SELECT `id` FROM `' . $rStage . '`.`' . $rTable . '`'
+				. ' WHERE `id` > ' . $rLastID . ' ORDER BY `id` ASC LIMIT 5000;')) {
+				return $rMap;
+			}
+
+			$rPage = $db->get_rows();
+
+			if (empty($rPage)) {
+				return $rMap;
+			}
+
+			foreach ($rPage as $rRow) {
+				$rLastID = (int) $rRow['id'];
+				$rMap[$rLastID] = $rLastID;
+			}
+
+			if (count($rPage) < 5000) {
+				return $rMap;
+			}
+		}
+	}
+
+	/**
+	 * The positive integers of a stored id list, tolerating the shapes real
+	 * dumps carry: '[]', '', NULL, and text that never was JSON.
+	 *
+	 * @param mixed $rRaw The column value as fetched.
+	 * @return int[]
+	 */
+	private function idList($rRaw): array {
+		$rDecoded = json_decode((string) $rRaw, true);
+
+		if (!is_array($rDecoded)) {
+			return array();
+		}
+
+		$rOut = array();
+
+		foreach ($rDecoded as $rID) {
+			$rID = (int) $rID;
+
+			if ($rID > 0) {
+				$rOut[] = $rID;
+			}
+		}
+
+		return $rOut;
+	}
+
+	/**
+	 * Re-number one stored id list through a dump id => live id map.
+	 *
+	 * @param string $rRaw   The column value as fetched.
+	 * @param array  $rMap     dump id => live id.
+	 * @param int    $rFixed  Count of ids that changed number, by reference.
+	 * @param int    $rGone   Count of ids no imported row stands behind, by reference.
+	 * @return string JSON in the exact shape the panel's own writers emit.
+	 */
+	private function remapIDList(string $rRaw, array $rMap, int &$rFixed, int &$rGone): string {
+		$rOut = array();
+
+		foreach ($this->idList($rRaw) as $rID) {
+			if (!isset($rMap[$rID])) {
+				$rGone++;
+				continue;
+			}
+
+			$rNew = (int) $rMap[$rID];
+
+			if ($rNew !== $rID) {
+				$rFixed++;
+			}
+
+			$rOut[] = $rNew;
+		}
+
+		return '[' . implode(',', $rOut) . ']';
+	}
+
+	/**
+	 * Columns a table has in both the staged dump and the live database.
+	 *
+	 * @param object $db     Database handle.
+	 * @param string $rStage Staging database name.
+	 * @param string $rTable Table name.
+	 * @return string[]
+	 */
+	private function commonColumns($db, $rStage, $rTable): array {
+		$db->query(
+			'SELECT a.`COLUMN_NAME` AS `c`
+			 FROM `information_schema`.`COLUMNS` a
+			 INNER JOIN `information_schema`.`COLUMNS` b
+			     ON b.`TABLE_SCHEMA` = ? AND b.`TABLE_NAME` = a.`TABLE_NAME`
+			    AND b.`COLUMN_NAME` = a.`COLUMN_NAME`
+			 WHERE a.`TABLE_SCHEMA` = DATABASE() AND a.`TABLE_NAME` = ?
+			 ORDER BY a.`ORDINAL_POSITION`;',
+			$rStage,
+			$rTable
+		);
+
+		$rOut = array();
+
+		foreach (($db->num_rows() > 0 ? $db->get_rows() : array()) as $rRow) {
+			$rOut[] = (string) $rRow['c'];
+		}
+
+		return $rOut;
+	}
+
+	/**
+	 * Columns the dump has that this panel does not, so they can be named.
+	 *
+	 * @param object $db     Database handle.
+	 * @param string $rStage Staging database name.
+	 * @param string $rTable Table name.
+	 * @return string[]
+	 */
+	private function foreignOnlyColumns($db, $rStage, $rTable): array {
+		$db->query(
+			'SELECT `COLUMN_NAME` AS `c` FROM `information_schema`.`COLUMNS`
+			 WHERE `TABLE_SCHEMA` = ? AND `TABLE_NAME` = ?
+			   AND `COLUMN_NAME` NOT IN (
+			       SELECT `COLUMN_NAME` FROM `information_schema`.`COLUMNS`
+			       WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = ?
+			   )
+			 ORDER BY `ORDINAL_POSITION`;',
+			$rStage,
+			$rTable,
+			$rTable
+		);
+
+		$rOut = array();
+
+		foreach (($db->num_rows() > 0 ? $db->get_rows() : array()) as $rRow) {
+			$rOut[] = (string) $rRow['c'];
+		}
+
+		return $rOut;
+	}
+
 	private function printUsage(): void {
 		echo "Usage: console.php tools <subcommand>\n\n";
 		echo "Subcommands (run as xc_vm):\n";
@@ -214,6 +850,11 @@ class ToolsCommand implements CommandInterface {
 		echo "  mysql       Reauthorise load balancers on MySQL\n";
 		echo "  database    Restore blank \XC_VM database (requires --confirm)\n";
 		echo "  flush       Flush all blocked IPs (iptables + database)\n";
+		echo "  import      Analyse a foreign panel dump, and migrate what fits\n";
+		echo "              console.php tools import /root/xui.sql           (report only)\n";
+		echo "              console.php tools import /root/xui.sql --apply   (write)\n";
+		echo "              Against a table that already has rows, copied ids are renumbered\n";
+		echo "              and every id list pointing at them is rewritten to match.\n";
 	}
 
 	private function processRecaptcha($db): int {

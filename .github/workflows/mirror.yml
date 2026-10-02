@@ -24,6 +24,13 @@ on:
         required: false
         default: false
         type: boolean
+  # Same push-tag route as mirror-base.yml, for clients that cannot reach
+  # `workflow_dispatch`:  git tag seed-binaries && git push origin seed-binaries
+  # `seed-binaries*` never collides with the `binaries-<tag>` releases this
+  # job publishes, so it cannot retrigger itself.
+  push:
+    tags:
+      - 'seed-binaries*'
   schedule:
     # Monday 04:00 UTC — picks up new upstream binary builds on its own.
     - cron: '0 4 * * 1'
@@ -37,6 +44,15 @@ concurrency:
 
 env:
   UPSTREAM: Vateron-Media/XC_VM_Binaries
+
+  # gh infers which repository to act on from the git checkout it is run in.
+  # These mirror jobs deliberately never check the tree out — they only move
+  # release assets between repositories, and cloning would be pure waste — so
+  # there is no .git for gh to read and every `gh release` call that omits
+  # --repo dies with "failed to run git: fatal: not a git repository". An
+  # explicit --repo still overrides this, which is what the calls that read
+  # from upstream rely on.
+  GH_REPO: ${{ github.repository }}
 
 jobs:
   mirror:
@@ -139,7 +155,7 @@ jobs:
               --title "XC_VM binaries $TAG" \
               --notes "Mirror of [\`$UPSTREAM\` $TAG](https://github.com/$UPSTREAM/releases/tag/$TAG), verified against its \`hashes.md5\`.
 
-Published here so panel installs do not depend on the upstream repository. Contents are unmodified." \
+          Published here so panel installs do not depend on the upstream repository. Contents are unmodified." \
               --prerelease
           fi
           gh release upload "$MIRROR_TAG" dl/* --clobber

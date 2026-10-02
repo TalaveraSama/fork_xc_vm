@@ -194,6 +194,11 @@ renderUnifiedLayoutFooter('admin');
 			} else {
 				$.toast(data.error || "An error occured while processing your request.");
 			}
+		}).fail(function (rXHR) {
+			// Without this a failed request is completely silent: no
+			// toast, no console entry, nothing. A 502 or an expired
+			// session then looks exactly like a button that does nothing.
+			$.toast("Request failed (" + rXHR.status + "). Check the panel log.");
 		});
 	}
 
@@ -208,6 +213,11 @@ renderUnifiedLayoutFooter('admin');
 			setTimeout(function() {
 				location.reload();
 			}, 1200);
+		}).fail(function (rXHR) {
+			// Without this a failed request is completely silent: no
+			// toast, no console entry, nothing. A 502 or an expired
+			// session then looks exactly like a button that does nothing.
+			$.toast("Request failed (" + rXHR.status + "). Check the panel log.");
 		});
 	}
 
@@ -240,6 +250,11 @@ renderUnifiedLayoutFooter('admin');
 			} else {
 				$.toast(data.error || "An error occured while processing your request.");
 			}
+		}).fail(function (rXHR) {
+			// Without this a failed request is completely silent: no
+			// toast, no console entry, nothing. A 502 or an expired
+			// session then looks exactly like a button that does nothing.
+			$.toast("Request failed (" + rXHR.status + "). Check the panel log.");
 		});
 	}
 

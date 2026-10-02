@@ -30,7 +30,7 @@ define('DEV_MODE', false);
 
 // ── Version & Git Configuration ────────────────────────────────
 
-define('XC_VM_VERSION', '2.3.9');
+define('XC_VM_VERSION', '2.7.13');
 
 define('GIT_OWNER',       'Vateron-Media');
 define('GIT_REPO_MAIN',   'fork_xc_vm');
@@ -38,13 +38,18 @@ define('GIT_REPO_UPDATE', 'XC_VM_Update');
 define('GIT_REPO_BIN',    'fork_xc_vm');
 define('GIT_REPO_PROXY',  'XC_VM_Proxy');
 
-// The panel and its bundled binaries come from this fork, so the in-panel
-// updater cannot pull upstream's archive over the patches applied here.
-// GeoIP (XC_VM_Update) and the proxy node stay with upstream: they are data,
-// not panel code, and this fork adds nothing to them -- which is why the
-// owner is per-repo rather than one shared constant.
-define('GIT_OWNER_MAIN',  'TalaveraSama');
-define('GIT_OWNER_BIN',   'TalaveraSama');
+// Every repository the panel fetches from is owned per-repo rather than by
+// one shared constant, so each can be pointed at this fork independently.
+// The panel and its bundled binaries must come from here: the in-panel
+// updater would otherwise pull upstream's archive over the patches applied
+// in this tree. GeoIP and the proxy node are data this fork adds nothing to,
+// but they are mirrored too so that nothing the panel downloads at runtime
+// depends on Vateron-Media staying reachable. Point any of these back at
+// 'Vateron-Media' to fall back to upstream for that one repository.
+define('GIT_OWNER_MAIN',   'TalaveraSama');
+define('GIT_OWNER_BIN',    'TalaveraSama');
+define('GIT_OWNER_UPDATE', 'TalaveraSama');
+define('GIT_OWNER_PROXY',  'TalaveraSama');
 
 // ── Miscellaneous Settings ─────────────────────────────────────
 

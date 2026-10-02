@@ -20,7 +20,12 @@ on:
       # v2.3.9-flussonic.N here; the public fork tags plain versions, because
       # the in-panel updater compares tags with PHP's version_compare and a
       # text suffix would sort *below* the version it is meant to supersede.
-      - 'v*'
+      #
+      # 'v[0-9]*', not 'v*': the loose form matched every tag beginning with a
+      # v, so pushing 'verify-2.3.9' to start the release check also started a
+      # full build and published a stray prerelease named after it. A version
+      # tag always has a digit after the v.
+      - 'v[0-9]*'
       - '[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
     inputs:
@@ -32,6 +37,11 @@ on:
         description: 'Mark the release as a pre-release'
         required: false
         default: true
+        type: boolean
+      allow_upstream_base:
+        description: 'Allow falling back to Vateron-Media for the base layer'
+        required: false
+        default: false
         type: boolean
 
 permissions:
@@ -63,49 +73,144 @@ jobs:
         id: base
         env:
           GH_TOKEN: ${{ github.token }}
+          # Empty on a tag push, which is deliberate: an unattended release is
+          # a self-contained one or it is no release at all.
+          ALLOW_UPSTREAM: ${{ github.event.inputs.allow_upstream_base || 'false' }}
         run: |
           set -euo pipefail
           version=$(sed -nE "s/.*define\('XC_VM_VERSION', *'([^']+)'\).*/\1/p" \
                     Core/Config/AppConfig.php | head -1)
           echo "panel version $version"
+          echo "panel_version=$version" >> "$GITHUB_OUTPUT"
 
           if git cat-file -e HEAD:bin/php/bin/php 2>/dev/null; then
             echo "args=--bin-ref HEAD" >> "$GITHUB_OUTPUT"
+            echo "origin=this repository @ HEAD (committed bin/)" >> "$GITHUB_OUTPUT"
             echo "bin/ is committed here"; exit 0
           fi
           if git rev-parse --verify origin/main >/dev/null 2>&1 \
              || git fetch -q --depth=1 origin main:refs/remotes/origin/main 2>/dev/null; then
             if git cat-file -e origin/main:bin/php/bin/php 2>/dev/null; then
               echo "args=--bin-ref origin/main" >> "$GITHUB_OUTPUT"
+              echo "origin=this repository @ origin/main (committed bin/)" >> "$GITHUB_OUTPUT"
               echo "bin/ is on origin/main"; exit 0
             fi
           fi
 
-          for src in "$GITHUB_REPOSITORY base-$version" "Vateron-Media/XC_VM $version"; do
-            set -- $src
-            echo "trying $1 @ $2"
-            if gh release download "$2" --repo "$1" --pattern 'xc_vm.tar.gz' \
-                 --dir "$RUNNER_TEMP" 2>/dev/null; then
-              echo "args=--base-tar $RUNNER_TEMP/xc_vm.tar.gz" >> "$GITHUB_OUTPUT"
-              echo "base archive from $1 @ $2"
-              ls -la "$RUNNER_TEMP/xc_vm.tar.gz"; exit 0
+          # This fork's own mirror first. Upstream is NOT tried unless asked
+          # for: a release whose runtime layer came from Vateron-Media is a
+          # release that still depends on them, and the old order fell through
+          # to upstream silently, so nothing on the release page said so.
+          if gh release download "base-$version" --repo "$GITHUB_REPOSITORY" \
+               --pattern 'xc_vm.tar.gz' --dir "$RUNNER_TEMP" 2>/dev/null; then
+            echo "args=--base-tar $RUNNER_TEMP/xc_vm.tar.gz" >> "$GITHUB_OUTPUT"
+            echo "origin=$GITHUB_REPOSITORY @ base-$version" >> "$GITHUB_OUTPUT"
+            echo "base archive from this fork: base-$version"
+            # Which upstream version that layer was taken from -- not always
+            # $version, since this fork's numbering can run ahead. Base releases
+            # made before this file existed get the old assumption, which is
+            # exactly what they were built on.
+            gh release download "base-$version" --repo "$GITHUB_REPOSITORY" \
+              --pattern 'upstream-tag.txt' --dir "$RUNNER_TEMP" 2>/dev/null || true
+            if [ -s "$RUNNER_TEMP/upstream-tag.txt" ]; then
+              up=$(tr -d '\r\n' < "$RUNNER_TEMP/upstream-tag.txt")
+            else
+              # Base releases predating that asset. Ask the manifest rather
+              # than assuming $version: the two are different facts, and
+              # upstream's 2.4.x tags exist as prereleases, so the assumption
+              # would credit a tree nobody built against.
+              up=$(grep -vE '^[[:space:]]*(#|$)' .github/upstream-base.txt 2>/dev/null \
+                   | head -1 | tr -d '[:space:]' || true)
+              [ -n "$up" ] || up="$version"
             fi
-          done
+            echo "upstream_version=$up" >> "$GITHUB_OUTPUT"
+            ls -la "$RUNNER_TEMP/xc_vm.tar.gz"; exit 0
+          fi
 
-          echo "::error::no base layer: no committed bin/, and no xc_vm.tar.gz in $GITHUB_REPOSITORY base-$version or Vateron-Media/XC_VM $version"
+          if [ "$ALLOW_UPSTREAM" != "true" ]; then
+            echo "::error::no base layer in $GITHUB_REPOSITORY (release base-$version with xc_vm.tar.gz)."
+            echo "::error::Run 'Mirror upstream base archive' once to seed it. That is what makes"
+            echo "::error::this fork self-contained. To build from Vateron-Media anyway, re-run with"
+            echo "::error::allow_upstream_base = true -- the release notes will record it."
+            exit 1
+          fi
+
+          echo "::warning::falling back to Vateron-Media/XC_VM @ $version -- this release is not self-contained"
+          if gh release download "$version" --repo Vateron-Media/XC_VM \
+               --pattern 'xc_vm.tar.gz' --dir "$RUNNER_TEMP" 2>/dev/null; then
+            echo "args=--base-tar $RUNNER_TEMP/xc_vm.tar.gz" >> "$GITHUB_OUTPUT"
+            echo "origin=Vateron-Media/XC_VM @ $version (upstream)" >> "$GITHUB_OUTPUT"
+            ls -la "$RUNNER_TEMP/xc_vm.tar.gz"; exit 0
+          fi
+
+          echo "::error::no base layer: no committed bin/, no xc_vm.tar.gz in $GITHUB_REPOSITORY base-$version, and none upstream at $version"
           exit 1
 
-      # Scoped to what this repository changes on top of upstream. Linting the
-      # whole tree would only re-test upstream's own CI, and a false positive
-      # from a newer PHP than the bundled 8.1 would block the release.
-      - name: Lint changed PHP sources
+      # Scoped to what this fork changes on top of upstream -- the manifest in
+      # .github/patched-upstream-files.txt -- plus the module it adds. Linting
+      # the whole tree would only re-test upstream's own CI, and a false
+      # positive from a newer PHP than the bundled 8.1 would block the release.
+      #
+      # This step used to diff against a hardcoded base commit. That SHA
+      # belonged to the private working repo, so here `git diff` aborted with
+      # "Invalid symmetric difference expression", wrote to stderr, and the
+      # loop read nothing: the step went green having linted zero files, which
+      # is precisely the guard that is supposed to stop a SyntaxError reaching
+      # someone's server. Hence the counts and the two hard failures below --
+      # an empty file set, or a manifest entry missing from the tree.
+      - name: Lint the PHP this fork owns
         run: |
+          set -euo pipefail
           php -v
+
+          manifest=.github/patched-upstream-files.txt
+          [ -f "$manifest" ] || { echo "::error::missing $manifest"; exit 1; }
+
+          entries=0
+          missing=0
+          files=$(mktemp)
+
+          while IFS= read -r f || [ -n "$f" ]; do
+            case "$f" in ''|'#'*) continue ;; esac
+            entries=$((entries + 1))
+            if [ ! -f "$f" ]; then
+              echo "::error::listed in $manifest but not in the tree: $f"
+              missing=1
+              continue
+            fi
+            case "$f" in *.php) printf '%s\n' "$f" >> "$files" ;; esac
+          done < "$manifest"
+
+          [ "$entries" -gt 0 ] || { echo "::error::$manifest lists no files"; exit 1; }
+          [ "$missing" -eq 0 ] || exit 1
+
+          # Everything the fork adds of its own. dev/ is an offline preview
+          # harness excluded from releases, but a parse error there still means
+          # a broken commit, so it is linted too.
+          if [ -d Modules/flussonic_1f4a9 ]; then
+            find Modules/flussonic_1f4a9 -type f -name '*.php' >> "$files"
+          fi
+
+          sort -u -o "$files" "$files"
+          count=$(wc -l < "$files")
+          echo "manifest entries: $entries -- PHP files to lint: $count"
+          [ "$count" -gt 0 ] || {
+            echo "::error::file set is empty; refusing to pass a lint that checked nothing"
+            exit 1
+          }
+
           fail=0
           while IFS= read -r f; do
-            php -l "$f" > /dev/null || { echo "SYNTAX ERROR: $f"; fail=1; }
-          done < <(git diff --name-only 5fa97380b9169247f11583c6d1fd208d1b2a46a0...HEAD -- '*.php' \
-                    | grep -v '^vendor/' | while read -r f; do [ -f "$f" ] && echo "$f"; done)
+            if php -l "$f" > /dev/null 2>&1; then
+              echo "OK            $f"
+            else
+              echo "SYNTAX ERROR  $f"
+              php -l "$f" || true
+              fail=1
+            fi
+          done < "$files"
+
+          echo "linted $count file(s)"
           exit $fail
 
       # compile(), not ast.parse(): the latter accepts symbol-table errors like
@@ -131,8 +236,53 @@ jobs:
       # The checksums go into the release body itself, so what was published can
       # be verified from the release page (and the API) without downloading it.
       - name: Compose release notes
+        env:
+          BASE_ORIGIN: ${{ steps.base.outputs.origin }}
+          PANEL_VERSION: ${{ steps.base.outputs.panel_version }}
+          UPSTREAM_VERSION: ${{ steps.base.outputs.upstream_version }}
         run: |
-          cp .github/release-notes.md release-body.md
+          # What the archive carries is a property of the build, not of the
+          # template. It used to be asserted in prose - "bundles the full
+          # runtime ... so the install still completes if XC_VM_Binaries is
+          # unreachable" - which stopped being true the moment a build could
+          # start from upstream's base archive, whose bin/ is a skeleton. A
+          # release that overstates what is in it sends someone into an
+          # install that cannot finish.
+          if grep -q '^layer complete$' dist/runtime-inventory.txt; then
+            cat > runtime.md <<'EOF'
+          The archive bundles the full runtime — the PHP 8.1 build with `xcvm_core.so`
+          and the ionCube loader, nginx, nginx-rtmp, redis, ffmpeg and yt-dlp — so the
+          install completes even if the binaries mirror is unreachable.
+          EOF
+          else
+            {
+              echo 'The archive carries the panel and the shared data, and the'
+              echo 'distribution-specific runtime is downloaded during the install, the'
+              echo 'way upstream does it. These are fetched, not bundled:'
+              echo
+              sed -n 's|^absent |- `|p' dist/runtime-inventory.txt | sed 's|$|`|'
+              echo
+              echo 'They come from this repository’s own `binaries-*` release, not from'
+              echo '`Vateron-Media/XC_VM_Binaries`, so the install still depends on nothing'
+              echo 'upstream — but it does need network access to GitHub.'
+            } > runtime.md
+          fi
+          python3 - <<'PY'
+          import os, pathlib, re
+          body = pathlib.Path('.github/release-notes.md').read_text()
+          marks = {
+              '@@RUNTIME@@': pathlib.Path('runtime.md').read_text().rstrip('\n'),
+              '@@VERSION@@': os.environ.get('PANEL_VERSION', ''),
+              '@@UPSTREAM_VERSION@@': os.environ.get('UPSTREAM_VERSION', ''),
+          }
+          for mark, value in marks.items():
+              assert mark in body, f'release-notes.md lost its {mark} marker'
+              assert value, f'nothing to substitute for {mark}'
+              body = body.replace(mark, value)
+          left = sorted(set(re.findall(r'@@[A-Z_]+@@', body)))
+          assert not left, f'unsubstituted markers left in the notes: {left}'
+          pathlib.Path('release-body.md').write_text(body)
+          PY
           {
             echo
             echo '## Assets'
@@ -144,6 +294,22 @@ jobs:
                 "$name" "$(numfmt --to=iec --suffix=B "$(stat -c%s "dist/$name")")" "$md5"
             done < dist/hashes.md5
             echo
+            echo '## Provenance'
+            echo
+            printf 'Runtime base layer: `%s`.\n' "$BASE_ORIGIN"
+            case "$BASE_ORIGIN" in
+              *upstream*)
+                echo
+                echo '> This build fell back to Vateron-Media for its runtime layer,'
+                echo '> so it is **not** self-contained. Run *Mirror upstream base'
+                echo '> archive* and rebuild to cut that dependency.'
+                ;;
+              *)
+                echo
+                echo 'Nothing was taken from `Vateron-Media/XC_VM` to produce this release.'
+                ;;
+            esac
+            echo
             printf 'Built from `%s` by [run %s](%s/%s/actions/runs/%s).\n' \
               "$(git rev-parse --short HEAD)" "$GITHUB_RUN_ID" \
               "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
@@ -154,10 +320,34 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.meta.outputs.tag }}
-          PRERELEASE: ${{ github.event.inputs.prerelease || 'true' }}
+          # Empty on a tag push -- decided from the tag below, not defaulted.
+          PRERELEASE: ${{ github.event.inputs.prerelease }}
         run: |
+          # This used to default to 'true' whenever the run was not dispatched
+          # by hand, which quietly defeated the one tag that matters: the fork
+          # publishes a plain N.N.N so the in-panel updater can find it, and
+          # GitHubReleases drops prereleases on the stable channel -- so every
+          # tag-pushed 2.3.9 was published invisible to the thing meant to see
+          # it. Suffixed tags (v2.3.9-flussonic.N) stay prereleases; they sort
+          # below 2.3.9 under version_compare and are not meant to supersede it.
+          if [ -z "$PRERELEASE" ]; then
+            if printf '%s' "$TAG" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              PRERELEASE=false
+            else
+              PRERELEASE=true
+            fi
+            echo "tag '$TAG' -> prerelease=$PRERELEASE"
+          fi
+
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release edit "$TAG" --title "XC_VM $TAG" --notes-file release-body.md
+            # --draft and --prerelease are reconciled on every edit, not just
+            # set at creation. A release whose tag is deleted is demoted to a
+            # draft by GitHub, and a draft is invisible to the in-panel
+            # updater exactly like a prerelease is, so rebuilding an existing
+            # tag has to be able to put it back rather than quietly refresh
+            # the notes of something nobody can see.
+            gh release edit "$TAG" --title "XC_VM $TAG" --notes-file release-body.md \
+              --draft=false --prerelease="$PRERELEASE"
           else
             flags=""
             [ "$PRERELEASE" = "true" ] && flags="--prerelease"

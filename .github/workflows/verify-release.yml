@@ -1,0 +1,105 @@
+name: Verify a release installs
+
+# "The build succeeded" is not the same claim as "the install finishes".
+#
+# The published archive is deliberately not self-contained: it carries the
+# panel and the shared data, while php, nginx and nginx_rtmp are
+# distribution-specific and the installer downloads them separately from the
+# binaries mirror. So the only honest check is to reassemble what an install
+# would actually end up with -- base archive plus the per-distribution tarball,
+# combined the way `install` combines them -- and look at the result.
+#
+# build/verify-release.py does that, and is runnable by hand on the machine
+# you are about to install on:
+#
+#   build/verify-release.py --tag 2.3.9 --distro all
+#
+# Started here by pushing a tag, because workflow_dispatch needs the Actions
+# tab or a real gh:
+#
+#   git tag verify-2.3.9 && git push origin verify-2.3.9
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to verify (blank = latest stable)'
+        required: false
+        type: string
+      distro:
+        description: "'all', or one stem such as ubuntu_22"
+        required: false
+        default: all
+        type: string
+  push:
+    tags:
+      - 'verify-*'
+  # Every future release gets checked without anyone remembering to.
+  # Note: this does NOT fire for releases made by build-release.yml. GitHub
+  # refuses to start workflows from events raised with the default
+  # GITHUB_TOKEN, and publishing 2.4.0 started no verify run. Kept for a
+  # release published by hand in the web UI; otherwise push a verify-<v> tag.
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Reassemble the install and inspect it
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out which release to look at
+        id: what
+        env:
+          # On a release event, check the release that was just published;
+          # on a verify-<tag> push, the part after the prefix, so
+          # `verify-2.3.9` checks 2.3.9; otherwise the dispatch input, and
+          # blank means the latest stable one.
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            release) tag="$RELEASE_TAG" ;;
+            push)
+              tag="${REF#verify-}"
+              if [ "$tag" = "$REF" ]; then tag=""; fi
+              ;;
+            *)       tag="$INPUT_TAG" ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "checking '${tag:-latest stable}'"
+
+      - name: Verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.what.outputs.tag }}
+          DISTRO: ${{ inputs.distro || 'all' }}
+        run: |
+          set -euo pipefail
+          args="--owner ${GITHUB_REPOSITORY%/*} --repo ${GITHUB_REPOSITORY#*/} --distro $DISTRO"
+          if [ -n "$TAG" ]; then args="$args --tag $TAG"; fi
+          # shellcheck disable=SC2086
+          build/verify-release.py $args 2>&1 | tee verify.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '### Release verification'
+            echo
+            echo '```'
+            cat verify.log 2>/dev/null || echo '(the check produced no output)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
