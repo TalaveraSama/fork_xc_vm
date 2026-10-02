@@ -2446,3 +2446,39 @@ or restore the module before publishing anything it should take.
 What leaves with it: five tables (`dvb_adapters`, `dvb_transponders`,
 `dvb_services`, `dvb_camd`, `dvb_jobs`) are no longer created on fresh
 installs; existing databases keep them, harmlessly, until dropped by hand.
+
+## `tools import` — migrating from another Xtream-derived panel
+
+Asked for as a backup/import module. Built into `console.php tools` instead,
+which already exists, already has the database handle and is already how an
+operator reaches this kind of job. A module would have meant a schema,
+migrations, a controller and views for something run once per migration.
+
+XUI.ONE, Xtream UI and this panel share an ancestor, so the table names line
+up and the columns mostly do not: each fork grew its own over the years.
+Restoring such a dump over the live database is what makes people report that
+their backup "does not work". A real one measured here: XUI's `streams`
+carries 58 columns including `plex_uuid`, `tmdb_id`, `adaptive_link` and
+`title_sync`, none of which exist on this side.
+
+    console.php tools import /root/xui.sql            # report only
+    console.php tools import /root/xui.sql --apply    # write
+    console.php tools import /root/xui.sql --apply --lines
+
+It stages the dump into `xc_vm_import`, intersects the columns through
+`information_schema` table by table, and copies only what both sides agree
+on, in dependency order: `streams_categories`, then `streams`, then
+`bouquets`. It names the columns it is dropping rather than discarding them
+silently.
+
+Two deliberate refusals. `servers` is never imported — those rows describe
+the machines of the installation the dump came from, and importing them
+breaks the panel. `lines` needs `--lines` on top of `--apply`, because a
+password format that does not match locks out every customer at once.
+
+The staging database is kept afterwards, for comparing what arrived against
+what was offered.
+
+Not yet done: `bouquets` stores lists of stream ids as JSON, so a bouquet
+imported alongside streams that were renumbered will point at the wrong
+channels. Remapping those ids is the obvious next piece of work.
