@@ -8,6 +8,7 @@ use XcVm\Public\Controllers\Admin\AjaxController;
 use XcVm\Public\Controllers\Admin\ArchiveController;
 use XcVm\Public\Controllers\Admin\AsnsController;
 use XcVm\Public\Controllers\Admin\BackupsController;
+use XcVm\Public\Controllers\Admin\BrandingController;
 use XcVm\Public\Controllers\Admin\BouquetController;
 use XcVm\Public\Controllers\Admin\BouquetListController;
 use XcVm\Public\Controllers\Admin\BouquetOrderController;
@@ -175,6 +176,7 @@ $router->get('server_install', [ServerInstallController::class, 'index']);
 // ─── Group F: Settings ─────────────────────────────
 
 $router->get('settings', [SettingsController::class, 'index']);
+$router->any('branding', [BrandingController::class, 'index']);
 $router->any('modules', [ModulesController::class, 'index']);
 $router->get('magscan_settings', [MagscanSettingsController::class, 'index']);
 

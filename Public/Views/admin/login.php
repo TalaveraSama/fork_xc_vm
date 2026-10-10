@@ -6,6 +6,11 @@ use XcVm\Core\Http\RequestManager;
 use XcVm\Core\Util\NetworkUtils;
 use XcVm\Domain\Security\BlocklistService;
 
+// Branding (logo, video de fondo y textos configurables desde Ajustes -> Branding).
+$rLoginVideo      = (string) \XcVm\Domain\Branding\BrandingService::get('login_video', '');
+$rLoginVideoWebm  = (string) \XcVm\Domain\Branding\BrandingService::get('login_video_webm', '');
+$rLoginImage      = (string) \XcVm\Domain\Branding\BrandingService::get('login_image', '');
+
 include 'functions.php';
 
 if (file_exists(TMP_PATH . '.migration.first')) {
@@ -295,19 +300,25 @@ if (!isset($_SESSION['hash'])) {
     <body>
         <div class="login-container">
             <div class="video-section">
-                <video class="background-video" autoplay muted loop>
-                    <source src="assets/videos/login-bg.mp4" type="video/mp4">
-                    <source src="assets/videos/login-bg.webm" type="video/webm">
-                </video>
+                <?php if ($rLoginVideo !== '') : ?>
+                    <video class="background-video" autoplay muted loop>
+                        <source src="<?= htmlspecialchars($rLoginVideo, ENT_QUOTES); ?>" type="video/mp4">
+<?php if ($rLoginVideoWebm !== '') : ?>
+                        <source src="<?= htmlspecialchars($rLoginVideoWebm, ENT_QUOTES); ?>" type="video/webm">
+<?php endif; ?>
+                    </video>
+<?php elseif ($rLoginImage !== '') : ?>
+                    <img class="background-video" src="<?= htmlspecialchars($rLoginImage, ENT_QUOTES); ?>" alt="">
+<?php endif; ?>
                 <div class="video-overlay"></div>
             </div>
             <div class="login-section">
                 <div class="login-content">
                     <div class="login-form-wrapper">
                         <div class="logo-section">
-                            <img src="assets/images/logo.png" alt="XC_VM Logo">
-                            <div class="login-title">Welcome Back</div>
-                            <div class="login-subtitle">Sign in to your account</div>
+                            <img src="<?= \XcVm\Domain\Branding\BrandingService::asset('logo_login'); ?>" alt="<?= htmlspecialchars(\XcVm\Domain\Branding\BrandingService::panelName(), ENT_QUOTES); ?> Logo">
+                            <div class="login-title"><?= htmlspecialchars(\XcVm\Domain\Branding\BrandingService::loginTitle(), ENT_QUOTES); ?></div>
+                            <div class="login-subtitle"><?= htmlspecialchars(\XcVm\Domain\Branding\BrandingService::loginSubtitle(), ENT_QUOTES); ?></div>
                         </div>
                         <?php if (isset($_STATUS)): ?>
                             <?php switch ($_STATUS):

@@ -12,6 +12,13 @@
                 <?php endif; ?>
             </div>
         </div>
+        <?php if (\XcVm\Domain\Branding\BrandingService::supportVisibleFor('reseller')) : ?>
+        <div class="row">
+            <div class="col-12">
+                <?= \XcVm\Domain\Branding\BrandingService::renderSupportCard($language ?? null) ?>
+            </div>
+        </div>
+        <?php endif; ?>
         <div class="row">
             <div class="col-md-6 col-xl-3">
                 <a href="<?= $rPermissions['reseller_client_connection_logs'] ? 'live_connections' : 'javascript: void(0);' ?>">

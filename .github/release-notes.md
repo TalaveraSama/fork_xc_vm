@@ -2,26 +2,22 @@ XC_VM **@@VERSION@@** with the **Flussonic** module built in.
 
 ## Cambios en esta version
 
-- **Import de Flussonic**: los canales ya no se importan con el nombre tecnico
-  (`canal_tv`). Se convierte en un nombre legible (`canal tv`,
-  `Canal_TV_HD` -> `Canal TV HD`) sin tocar los titulos que ya son correctos.
-  Nuevo boton **renombrar** en *Flussonic -> Manage Servers* para arreglar los
-  canales importados antes de esta version (idempotente).
-- **Contador de conectados en vivo en todas las paginas**: antes solo se
-  refrescaba en el dashboard y, con el ajuste *Header Stats* apagado o en movil,
-  no se refrescaba en ninguna. Ahora se arranca siempre (intervalo 5 s,
-  configurable) y si la barra del topbar no esta visible aparece un indicador
-  flotante con conectados / usuarios / streams.
-- **Modulos watch (carpetas vigiladas) y plex**: sus vistas estaban escritas para
-  otro tema (Tabler/Bootstrap 5) y en este panel (Bootstrap 4 + mdi) los iconos y
-  botones salian **invisibles** y las pestanas no funcionaban. Traducidas al tema
-  real; ademas la pagina `/watch` ya no se queda en blanco (muestra el error si la
-  consulta falla) y tiene boton **Add Folder** propio.
-- **Menu Content**: nuevas entradas *Watch Folders* (`/watch`) y *Add Watch
-  Folder* (`/watch_add`) accesibles desde Content, no solo desde Management.
-- **Idiomas**: nuevas claves `watch_folders` y `add_watch_folder` en los 7 idiomas
-  y traduccion espanola corregida (`folder_watch`, `watch_settings`).
-
+- **Nuevo apartado Branding** (menu de usuario -> *Branding*, o `/{codigo}/branding`):
+  logo del login, logo de la barra superior y favicon (subiendo un fichero o con una
+  URL), video de fondo del login (MP4/WebM) o imagen alternativa, y titulo/subtitulo
+  del login. Se guarda en `config/branding.json` — sin migraciones — y los ficheros
+  en `Public/assets/admin/{images,videos}/branding/`.
+- **Bloque Support project editable**: se acaban las direcciones Bitcoin/Ethereum
+  fijas que traia el panel. Titulo, texto de introduccion y filas propias (nombre,
+  direccion o valor, enlace opcional e icono) con botones de copiar y QR, y
+  visibilidad por area: solo admin, admin + reseller, o tambien el portal de usuario.
+  Aparece en Ajustes y en el dashboard de reseller.
+- **`/watch` a prueba de fallos**: si la consulta de carpetas vigiladas falla, la
+  pagina lo muestra en pantalla y mantiene visible el boton *Add Folder*, en lugar de
+  quedarse en blanco.
+- **Instalador**: ya no copia los scripts auxiliares dentro del arbol del panel y
+  valida la sintaxis PHP como el usuario `xc_vm` (ejecutado como root, el PHP del
+  panel termina en segmentation fault con `-l`).
 ## Install
 
 ```bash

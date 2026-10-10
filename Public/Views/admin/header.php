@@ -21,7 +21,7 @@ if (count(get_included_files()) != 1 || TRUE):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <meta http-equiv="X-UA-Compatible" content="IE=edge" />
         <meta name="robots" content="noindex,nofollow">
-        <link rel="shortcut icon" href="assets/images/favicon.ico">
+        <link rel="shortcut icon" href="<?= \XcVm\Domain\Branding\BrandingService::asset('favicon'); ?>">
         <link href="assets/libs/jquery-nice-select/nice-select.css" rel="stylesheet" type="text/css" />
         <link href="assets/libs/switchery/switchery.min.css" rel="stylesheet" type="text/css" />
         <link href="assets/libs/select2/select2.min.css" rel="stylesheet" type="text/css" />
@@ -73,10 +73,10 @@ if (count(get_included_files()) != 1 || TRUE):
                         <div class="logo-box">
                             <a href="index" class="logo text-center">
                                 <span class="logo-lg<?= (isset($rUserInfo['hue']) && strlen($rUserInfo['hue']) > 0) ? ' whiteout' : ''; ?>">
-                                    <img src="assets/images/logo-topbar.png" alt="" height="60">
+                                    <img src="<?= \XcVm\Domain\Branding\BrandingService::asset('logo_topbar'); ?>" alt="" height="60">
                                 </span>
                                 <span class="logo-sm<?= (isset($rUserInfo['hue']) && strlen($rUserInfo['hue']) > 0) ? ' whiteout' : ''; ?>">
-                                    <img src="assets/images/logo-topbar.png" alt="" height="50">
+                                    <img src="<?= \XcVm\Domain\Branding\BrandingService::asset('logo_topbar'); ?>" alt="" height="50">
                                 </span>
                             </a>
                         </div>

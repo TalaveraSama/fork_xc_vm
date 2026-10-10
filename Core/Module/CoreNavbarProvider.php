@@ -515,6 +515,9 @@ class CoreNavbarProvider implements NavbarProviderInterface {
             ->parent('profile')->url('settings')
             ->label('general_settings')->permissions(['settings'])->order(20));
 
+        NavbarRegistry::add((new NavbarItem('profile.branding'))
+            ->parent('profile')->url('branding')
+            ->label('branding', 'Branding')->permissions(['settings'])->order(25));
         NavbarRegistry::add((new NavbarItem('profile.backups'))
             ->parent('profile')->url('backups')
             ->label('backup_settings')->permissions(['database'])->order(30));
