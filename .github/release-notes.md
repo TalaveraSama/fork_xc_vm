@@ -1,5 +1,27 @@
 XC_VM **@@VERSION@@** with the **Flussonic** module built in.
 
+## Cambios en esta version
+
+- **Import de Flussonic**: los canales ya no se importan con el nombre tecnico
+  (`canal_tv`). Se convierte en un nombre legible (`canal tv`,
+  `Canal_TV_HD` -> `Canal TV HD`) sin tocar los titulos que ya son correctos.
+  Nuevo boton **renombrar** en *Flussonic -> Manage Servers* para arreglar los
+  canales importados antes de esta version (idempotente).
+- **Contador de conectados en vivo en todas las paginas**: antes solo se
+  refrescaba en el dashboard y, con el ajuste *Header Stats* apagado o en movil,
+  no se refrescaba en ninguna. Ahora se arranca siempre (intervalo 5 s,
+  configurable) y si la barra del topbar no esta visible aparece un indicador
+  flotante con conectados / usuarios / streams.
+- **Modulos watch (carpetas vigiladas) y plex**: sus vistas estaban escritas para
+  otro tema (Tabler/Bootstrap 5) y en este panel (Bootstrap 4 + mdi) los iconos y
+  botones salian **invisibles** y las pestanas no funcionaban. Traducidas al tema
+  real; ademas la pagina `/watch` ya no se queda en blanco (muestra el error si la
+  consulta falla) y tiene boton **Add Folder** propio.
+- **Menu Content**: nuevas entradas *Watch Folders* (`/watch`) y *Add Watch
+  Folder* (`/watch_add`) accesibles desde Content, no solo desde Management.
+- **Idiomas**: nuevas claves `watch_folders` y `add_watch_folder` en los 7 idiomas
+  y traduccion espanola corregida (`folder_watch`, `watch_settings`).
+
 ## Install
 
 ```bash
