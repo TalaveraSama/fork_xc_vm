@@ -405,7 +405,7 @@ if (!isset($_SESSION['hash'])) {
                     </div>
                 </div>
                 <div class="login-footer">
-                    <div>&copy; <?= date('Y') ?> XC_VM Admin Panel. All rights reserved.</div>
+                    <div><?php $rFooter = trim((string) \XcVm\Domain\Branding\BrandingService::get('footer_text', '')); echo $rFooter !== '' ? htmlspecialchars($rFooter, ENT_QUOTES) : '&copy; ' . date('Y') . ' ' . htmlspecialchars(\XcVm\Domain\Branding\BrandingService::panelName(), ENT_QUOTES) . ' Admin Panel. All rights reserved.'; ?></div>
                 </div>
             </div>
         </div>

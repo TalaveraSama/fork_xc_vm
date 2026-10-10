@@ -41,6 +41,7 @@ class BrandingService {
 	public static function defaults(): array {
 		return array(
 			'panel_name'       => '',
+			'footer_text'      => '',
 			'logo_login'       => 'assets/images/logo.png',
 			'logo_topbar'      => 'assets/images/logo-topbar.png',
 			'favicon'          => 'assets/images/favicon.ico',
@@ -326,6 +327,7 @@ class BrandingService {
 
 		$rTextFields = array(
 			'panel_name',
+			'footer_text',
 			'logo_login',
 			'logo_topbar',
 			'favicon',

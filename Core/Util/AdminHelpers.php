@@ -221,7 +221,16 @@ class AdminHelpers {
 		$startYear = 2025;
 		$yearRange = ($startYear === (int)$currentYear) ? $startYear : "{$startYear}-{$currentYear}";
 
-		return "&copy; {$yearRange} <img height='20px' style='padding-left: 10px; padding-right: 10px; margin-top: -2px;' src='./assets/images/logo-topbar.png' /> v" . XC_VM_VERSION;
+		// Texto de pie configurable desde Ajustes -> Branding. Si esta definido se
+		// usa tal cual (con el logo y la version detras); si no, el de siempre.
+		$rFooterText = trim((string) \XcVm\Domain\Branding\BrandingService::get('footer_text', ''));
+		$rLogo = "<img height='20px' style='padding-left: 10px; padding-right: 10px; margin-top: -2px;' src='./" . \XcVm\Domain\Branding\BrandingService::asset('logo_topbar') . "' />";
+
+		if ($rFooterText !== '') {
+			return htmlspecialchars($rFooterText, ENT_QUOTES) . ' ' . $rLogo . ' v' . XC_VM_VERSION;
+		}
+
+		return "&copy; {$yearRange} {$rLogo} v" . XC_VM_VERSION;
 	}
 
 	/**

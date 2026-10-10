@@ -2,22 +2,12 @@ XC_VM **@@VERSION@@** with the **Flussonic** module built in.
 
 ## Cambios en esta version
 
-- **Nuevo apartado Branding** (menu de usuario -> *Branding*, o `/{codigo}/branding`):
-  logo del login, logo de la barra superior y favicon (subiendo un fichero o con una
-  URL), video de fondo del login (MP4/WebM) o imagen alternativa, y titulo/subtitulo
-  del login. Se guarda en `config/branding.json` — sin migraciones — y los ficheros
-  en `Public/assets/admin/{images,videos}/branding/`.
-- **Bloque Support project editable**: se acaban las direcciones Bitcoin/Ethereum
-  fijas que traia el panel. Titulo, texto de introduccion y filas propias (nombre,
-  direccion o valor, enlace opcional e icono) con botones de copiar y QR, y
-  visibilidad por area: solo admin, admin + reseller, o tambien el portal de usuario.
-  Aparece en Ajustes y en el dashboard de reseller.
-- **`/watch` a prueba de fallos**: si la consulta de carpetas vigiladas falla, la
-  pagina lo muestra en pantalla y mantiene visible el boton *Add Folder*, en lugar de
-  quedarse en blanco.
-- **Instalador**: ya no copia los scripts auxiliares dentro del arbol del panel y
-  valida la sintaxis PHP como el usuario `xc_vm` (ejecutado como root, el PHP del
-  panel termina en segmentation fault con `-l`).
+- **Texto del pie configurable** (menu de usuario -> *Branding* -> campo **Texto del pie**):
+  sustituye el `© 2026 XC_VM Admin Panel. All rights reserved.` del login y el
+  `© 2025-2026 [logo] vX.Y.Z` del pie del panel de administracion, que hasta ahora
+  estaban fijos en el codigo (`Public/Views/admin/login.php` y
+  `Core/Util/AdminHelpers.php`). Si se deja vacio se mantiene el texto original; el logo
+  y la version se siguen mostrando detras del texto propio.
 ## Install
 
 ```bash

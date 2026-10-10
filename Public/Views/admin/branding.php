@@ -60,6 +60,14 @@ $rScopes = array(
 					<small class="text-muted">Vacio = XC_VM.</small>
 				</div>
 			</div>
+			<div class="form-group row mb-0">
+				<label class="col-md-3 col-form-label" for="footer_text">Texto del pie</label>
+				<div class="col-md-7">
+					<input type="text" class="form-control" id="footer_text" name="footer_text"
+						value="<?= $rUrl('footer_text'); ?>" placeholder="&copy; 2026 Tu Marca. Todos los derechos reservados.">
+					<small class="text-muted">Aparece en el pie del panel y en el del login. Vacio = el texto original del panel.</small>
+				</div>
+			</div>
 		</div>
 	</div>
 
