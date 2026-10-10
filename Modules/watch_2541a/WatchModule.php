@@ -186,6 +186,17 @@ class WatchModule extends BaseModule {
         $registry->add((new NavbarItem('management.service_setup.watch'))
             ->parent('management.service_setup')->url('watch')
             ->label('folder_watch')->permissions(['folder_watch'])->order(60));
+
+        // Content menu: the watch folders are content, not service setup, so the
+        // list AND the "add folder" form are reachable straight from Content —
+        // otherwise the only entry lived under Management and the add form had
+        // to be typed by hand in the address bar.
+        $registry->add((new NavbarItem('content.streams.watch'))
+            ->parent('content.streams')->url('watch')
+            ->label('watch_folders', 'Watch Folders')->permissions(['folder_watch'])->order(60));
+        $registry->add((new NavbarItem('content.streams.watch_add'))
+            ->parent('content.streams')->url('watch_add')
+            ->label('add_watch_folder', 'Add Watch Folder')->permissions(['folder_watch'])->order(61));
         // Logs moved to their own top-level tab (core _logs()); folder-watch
         // output is an operational log, so it lives under the System logs group.
         $registry->add((new NavbarItem('logs.system.watch_output'))

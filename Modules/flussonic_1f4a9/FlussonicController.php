@@ -367,6 +367,10 @@ class FlussonicController {
 				$this->json(['result' => true, 'updated' => FlussonicSyncService::refreshImportedSources($rID)]);
 				break;
 
+			case 'fix_names':
+				$this->json(['result' => true, 'renamed' => FlussonicSyncService::repairImportedNames($rID)]);
+				break;
+
 			default:
 				$this->json(['result' => false, 'error' => 'Unknown action.']);
 		}

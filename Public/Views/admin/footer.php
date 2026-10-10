@@ -73,6 +73,7 @@ if (!isset($rModal) || !$rModal): ?>
 		window.XC_VM = window.XC_VM || {};
 		window.XC_VM.Config = {
 			jsNavigate: <?php echo !empty($rSettings['js_navigate']) ? 'true' : 'false'; ?>,
+			headerStatsInterval: 5000,
 			i18n: {
 				error_occured: <?php echo json_encode($language::get('error_occured')); ?>,
 				fingerprint_fail: <?php echo json_encode($language::get('fingerprint_fail')); ?>,
@@ -83,5 +84,12 @@ if (!isset($rModal) || !$rModal): ?>
 			}
 		};
 	</script>
-	<script src="assets/js/common.js"></script>
+	<script src="assets/js/common.js?v=2"></script>
+	<script>
+		/* Live connection counters on every admin page. headerStats() is
+		   idempotent, so the per-page calls are harmless when this ran first. */
+		$(document).ready(function() {
+			headerStats();
+		});
+	</script>
 <?php endif; ?>

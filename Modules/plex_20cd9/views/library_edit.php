@@ -7,7 +7,7 @@ use XcVm\Domain\Stream\StreamConfigRepository;
 ?>
 
 <div class="d-flex align-items-center mb-4">
-    <a href="plex" class="btn btn-icon btn-label-secondary me-3"><i class="icon-base ti tabler-arrow-left"></i></a>
+    <a href="plex" class="btn btn-outline-secondary mr-3"><i class="mdi mdi-arrow-left"></i></a>
     <h4 class="mb-0"><?= isset($rFolder) ? 'Edit' : 'Add' ?> Library</h4>
 </div>
 
@@ -17,21 +17,21 @@ use XcVm\Domain\Stream\StreamConfigRepository;
     <?php endif; ?>
     <input type="hidden" name="libraries" id="libraries" value="<?= isset($rFolder['plex_libraries']) ? htmlspecialchars($rFolder['plex_libraries']) : ''; ?>" />
 
-    <div class="card mb-6">
+    <div class="card mb-4">
         <div class="card-header px-0 pt-2">
-            <div class="nav-align-top">
+            <div class="">
                 <ul class="nav nav-tabs" role="tablist">
-                    <li class="nav-item"><button type="button" class="nav-link active" data-bs-toggle="tab" data-bs-target="#folder-details" role="tab"><i class="icon-base ti tabler-list-details me-1"></i>Details</button></li>
-                    <li class="nav-item"><button type="button" class="nav-link" data-bs-toggle="tab" data-bs-target="#settings" role="tab"><i class="icon-base ti tabler-settings me-1"></i>Settings</button></li>
+                    <li class="nav-item"><button type="button" class="nav-link active" data-toggle="tab" data-target="#folder-details" role="tab"><i class="mdi mdi-format-list-bulleted mr-1"></i>Details</button></li>
+                    <li class="nav-item"><button type="button" class="nav-link" data-toggle="tab" data-target="#settings" role="tab"><i class="mdi mdi-settings mr-1"></i>Settings</button></li>
                 </ul>
             </div>
         </div>
         <div class="card-body">
             <div class="tab-content p-0">
                 <div class="tab-pane fade show active" id="folder-details" role="tabpanel">
-                    <div class="mb-6">
-                        <label class="form-label" for="server_id">Server Name</label>
-                        <select name="server_id[]" id="server_id" class="form-select" multiple="multiple" data-placeholder="Choose...">
+                    <div class="mb-4">
+                        <label class="col-form-label" for="server_id">Server Name</label>
+                        <select name="server_id[]" id="server_id" class="form-control" multiple="multiple" data-placeholder="Choose...">
                             <?php
                             $rActiveServers = array();
                             if (isset($rFolder)) {
@@ -55,30 +55,30 @@ use XcVm\Domain\Stream\StreamConfigRepository;
                             ?>
                         </select>
                     </div>
-                    <div class="row mb-6">
+                    <div class="row mb-4">
                         <div class="col-md-8">
-                            <label class="form-label" for="plex_ip">Plex Server</label>
+                            <label class="col-form-label" for="plex_ip">Plex Server</label>
                             <input type="text" id="plex_ip" name="plex_ip" class="form-control" value="<?= isset($rFolder) ? $rFolder['plex_ip'] : ''; ?>" placeholder="Server IP" required>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label" for="plex_port">Port</label>
+                            <label class="col-form-label" for="plex_port">Port</label>
                             <input type="text" id="plex_port" name="plex_port" class="form-control text-center" value="<?= isset($rFolder) ? $rFolder['plex_port'] : ''; ?>" placeholder="Port" required>
                         </div>
                     </div>
-                    <div class="row mb-6">
+                    <div class="row mb-4">
                         <div class="col-md-6">
-                            <label class="form-label" for="username">Username</label>
+                            <label class="col-form-label" for="username">Username</label>
                             <input type="text" id="username" name="username" class="form-control" value="<?= isset($rFolder) ? $rFolder['plex_username'] : ''; ?>" placeholder="Username" required>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label" for="password">Password</label>
+                            <label class="col-form-label" for="password">Password</label>
                             <input type="password" id="password" name="password" class="form-control" value="<?= isset($rFolder) ? $rFolder['plex_password'] : ''; ?>" placeholder="Password">
                         </div>
                     </div>
-                    <div class="mb-6">
-                        <label class="form-label" for="library_id">Library</label>
+                    <div class="mb-4">
+                        <label class="col-form-label" for="library_id">Library</label>
                         <div class="input-group">
-                            <select id="library_id" name="library_id" class="form-select">
+                            <select id="library_id" name="library_id" class="form-control">
                                 <?php
                                 $rLibraries = isset($rFolder['plex_libraries']) ? json_decode($rFolder['plex_libraries'], true) : array();
                                 foreach ((is_array($rLibraries ?? null) ? $rLibraries : []) as $rLibrary) {
@@ -90,10 +90,10 @@ use XcVm\Domain\Stream\StreamConfigRepository;
                                 }
                                 ?>
                             </select>
-                            <button class="btn btn-primary" type="button" id="scanPlex"><i class="icon-base ti tabler-refresh"></i></button>
+                            <button class="btn btn-primary" type="button" id="scanPlex"><i class="mdi mdi-refresh"></i></button>
                         </div>
                     </div>
-                    <div class="row g-3 mb-6">
+                    <div class="row g-3 mb-4">
                         <div class="col-md-6">
                             <div class="form-check form-switch">
                                 <input name="active" id="active" type="checkbox" value="1" class="form-check-input" <?php if (!isset($rFolder) || (isset($rFolder) && $rFolder['active'])) {
@@ -107,20 +107,20 @@ use XcVm\Domain\Stream\StreamConfigRepository;
                                 <input name="direct_proxy" id="direct_proxy" type="checkbox" value="1" class="form-check-input" <?php if (!isset($rFolder) || (isset($rFolder) && $rFolder['direct_proxy'])) {
                                     echo 'checked ';
                                 } ?> />
-                                <label class="form-check-label" for="direct_proxy">Direct Stream <i title="When using direct source, hide the original Plex URL by proxying the movie through your servers. This will consume bandwidth but won't require the movie to be saved to your servers permanently." class="icon-base ti tabler-help-circle text-secondary"></i></label>
+                                <label class="form-check-label" for="direct_proxy">Direct Stream <i title="When using direct source, hide the original Plex URL by proxying the movie through your servers. This will consume bandwidth but won't require the movie to be saved to your servers permanently." class="mdi mdi-help-circle-outline text-secondary"></i></label>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <div class="tab-pane fade" id="settings" role="tabpanel">
-                    <div class="row g-3 mb-6">
+                    <div class="row g-3 mb-4">
                         <div class="col-md-6">
                             <div class="form-check form-switch">
                                 <input name="read_native" id="read_native" type="checkbox" value="1" class="form-check-input" <?php if (isset($rFolder) && $rFolder['read_native']) {
                                     echo 'checked ';
                                 } ?> />
-                                <label class="form-check-label" for="read_native">Native Frames <i title="Read input video at native frame rate." class="icon-base ti tabler-help-circle text-secondary"></i></label>
+                                <label class="form-check-label" for="read_native">Native Frames <i title="Read input video at native frame rate." class="mdi mdi-help-circle-outline text-secondary"></i></label>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -128,17 +128,17 @@ use XcVm\Domain\Stream\StreamConfigRepository;
                                 <input name="movie_symlink" id="movie_symlink" type="checkbox" value="1" class="form-check-input" <?php if (!isset($rFolder) || (isset($rFolder) && $rFolder['movie_symlink'])) {
                                     echo 'checked ';
                                 } ?> />
-                                <label class="form-check-label" for="movie_symlink">Create Symlink <i title="Generate a symlink to the original file instead of encoding. File needs to exist on all selected servers." class="icon-base ti tabler-help-circle text-secondary"></i></label>
+                                <label class="form-check-label" for="movie_symlink">Create Symlink <i title="Generate a symlink to the original file instead of encoding. File needs to exist on all selected servers." class="mdi mdi-help-circle-outline text-secondary"></i></label>
                             </div>
                         </div>
                     </div>
-                    <div class="row g-3 mb-6">
+                    <div class="row g-3 mb-4">
                         <div class="col-md-6">
                             <div class="form-check form-switch">
                                 <input name="auto_encode" id="auto_encode" type="checkbox" value="1" class="form-check-input" <?php if (!isset($rFolder) || (isset($rFolder) && $rFolder['auto_encode'])) {
                                     echo 'checked ';
                                 } ?> />
-                                <label class="form-check-label" for="auto_encode">Auto-Encode <i title="Start encoding as soon as the movie is added." class="icon-base ti tabler-help-circle text-secondary"></i></label>
+                                <label class="form-check-label" for="auto_encode">Auto-Encode <i title="Start encoding as soon as the movie is added." class="mdi mdi-help-circle-outline text-secondary"></i></label>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -146,17 +146,17 @@ use XcVm\Domain\Stream\StreamConfigRepository;
                                 <input name="scan_missing" id="scan_missing" type="checkbox" value="1" class="form-check-input" <?php if (isset($rFolder) && $rFolder['scan_missing']) {
                                     echo 'checked ';
                                 } ?> />
-                                <label class="form-check-label" for="scan_missing">Scan Missing ID's <i title="Check all Plex ID's in the XC_VM database against Plex database and scan missing items too. If this is off, XC_VM will only request items modified after the last scan date. Turning this on will increase time taken to scan as the entire library needs to be scanned instead of the recent items." class="icon-base ti tabler-help-circle text-secondary"></i></label>
+                                <label class="form-check-label" for="scan_missing">Scan Missing ID's <i title="Check all Plex ID's in the XC_VM database against Plex database and scan missing items too. If this is off, XC_VM will only request items modified after the last scan date. Turning this on will increase time taken to scan as the entire library needs to be scanned instead of the recent items." class="mdi mdi-help-circle-outline text-secondary"></i></label>
                             </div>
                         </div>
                     </div>
-                    <div class="row g-3 mb-6">
+                    <div class="row g-3 mb-4">
                         <div class="col-md-6">
                             <div class="form-check form-switch">
                                 <input name="auto_upgrade" id="auto_upgrade" type="checkbox" value="1" class="form-check-input" <?php if (!isset($rFolder) || (isset($rFolder) && $rFolder['auto_upgrade'])) {
                                     echo 'checked ';
                                 } ?> />
-                                <label class="form-check-label" for="auto_upgrade">Auto-Upgrade Quality <i title="Automatically upgrade quality if the system finds a new file with better quality that has the same Plex or TMDb ID." class="icon-base ti tabler-help-circle text-secondary"></i></label>
+                                <label class="form-check-label" for="auto_upgrade">Auto-Upgrade Quality <i title="Automatically upgrade quality if the system finds a new file with better quality that has the same Plex or TMDb ID." class="mdi mdi-help-circle-outline text-secondary"></i></label>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -164,17 +164,17 @@ use XcVm\Domain\Stream\StreamConfigRepository;
                                 <input name="store_categories" id="store_categories" type="checkbox" value="1" class="form-check-input" <?php if (!isset($rFolder) || (isset($rFolder) && $rFolder['store_categories'])) {
                                     echo 'checked ';
                                 } ?> />
-                                <label class="form-check-label" for="store_categories">Store Categories <i title="Save unrecognised categories to Plex Settings, this will allow you to allocate a category after the first run and it will then be added on the second run." class="icon-base ti tabler-help-circle text-secondary"></i></label>
+                                <label class="form-check-label" for="store_categories">Store Categories <i title="Save unrecognised categories to Plex Settings, this will allow you to allocate a category after the first run and it will then be added on the second run." class="mdi mdi-help-circle-outline text-secondary"></i></label>
                             </div>
                         </div>
                     </div>
-                    <div class="row g-3 mb-6">
+                    <div class="row g-3 mb-4">
                         <div class="col-md-6">
                             <div class="form-check form-switch">
                                 <input name="check_tmdb" id="check_tmdb" type="checkbox" value="1" class="form-check-input" <?php if (!isset($rFolder) || (isset($rFolder) && $rFolder['check_tmdb'])) {
                                     echo 'checked ';
                                 } ?> />
-                                <label class="form-check-label" for="check_tmdb">Check Against TMDb <i title="If the item has a TMDb ID, check it against the database to ensure duplicates aren't created due to previous content in the XC_VM system." class="icon-base ti tabler-help-circle text-secondary"></i></label>
+                                <label class="form-check-label" for="check_tmdb">Check Against TMDb <i title="If the item has a TMDb ID, check it against the database to ensure duplicates aren't created due to previous content in the XC_VM system." class="mdi mdi-help-circle-outline text-secondary"></i></label>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -182,13 +182,13 @@ use XcVm\Domain\Stream\StreamConfigRepository;
                                 <input name="remove_subtitles" id="remove_subtitles" type="checkbox" value="1" class="form-check-input" <?php if (isset($rFolder) && $rFolder['remove_subtitles']) {
                                     echo 'checked ';
                                 } ?> />
-                                <label class="form-check-label" for="remove_subtitles">Remove Existing Subtitles <i title="Remove existing subtitles from file before encoding. You can't remove hardcoded subtitles using this method." class="icon-base ti tabler-help-circle text-secondary"></i></label>
+                                <label class="form-check-label" for="remove_subtitles">Remove Existing Subtitles <i title="Remove existing subtitles from file before encoding. You can't remove hardcoded subtitles using this method." class="mdi mdi-help-circle-outline text-secondary"></i></label>
                             </div>
                         </div>
                     </div>
-                    <div class="mb-6">
-                        <label class="form-label" for="target_container"><?= $language::get('target_container'); ?> <i title="Which container to use when transcoding files." class="icon-base ti tabler-help-circle text-secondary"></i></label>
-                        <select name="target_container" id="target_container" class="form-select">
+                    <div class="mb-4">
+                        <label class="col-form-label" for="target_container"><?= $language::get('target_container'); ?> <i title="Which container to use when transcoding files." class="mdi mdi-help-circle-outline text-secondary"></i></label>
+                        <select name="target_container" id="target_container" class="form-control">
                             <?php foreach (array('auto', 'mp4', 'mkv', 'avi', 'mpg', 'flv', '3gp', 'm4v', 'wmv', 'mov', 'ts') as $container) { ?>
                                 <option <?php if (isset($rFolder) && $rFolder['target_container']) {
                                             echo 'checked ';
@@ -196,9 +196,9 @@ use XcVm\Domain\Stream\StreamConfigRepository;
                             <?php } ?>
                         </select>
                     </div>
-                    <div class="mb-6">
-                        <label class="form-label" for="override_bouquets">Override Bouquets</label>
-                        <select name="override_bouquets[]" id="override_bouquets" class="form-select" multiple="multiple" data-placeholder="Choose...">
+                    <div class="mb-4">
+                        <label class="col-form-label" for="override_bouquets">Override Bouquets</label>
+                        <select name="override_bouquets[]" id="override_bouquets" class="form-control" multiple="multiple" data-placeholder="Choose...">
                             <?php foreach ((is_array($rBouquets ?? null) ? $rBouquets : []) as $rBouquet) { ?>
                                 <?php $folderBouquets = (array) json_decode($rFolder['bouquets'] ?? '[]', true); ?>
                                 <option <?php if (in_array(intval($rBouquet['id']), $folderBouquets)) {
@@ -207,9 +207,9 @@ use XcVm\Domain\Stream\StreamConfigRepository;
                             <?php } ?>
                         </select>
                     </div>
-                    <div class="mb-6">
-                        <label class="form-label" for="fallback_bouquets">Fallback Bouquets</label>
-                        <select name="fallback_bouquets[]" id="fallback_bouquets" class="form-select" multiple="multiple" data-placeholder="Choose...">
+                    <div class="mb-4">
+                        <label class="col-form-label" for="fallback_bouquets">Fallback Bouquets</label>
+                        <select name="fallback_bouquets[]" id="fallback_bouquets" class="form-control" multiple="multiple" data-placeholder="Choose...">
                             <?php foreach ((is_array($rBouquets ?? null) ? $rBouquets : []) as $rBouquet) { ?>
                                 <?php $folderBouquets = (array) json_decode($rFolder['fb_bouquets'] ?? '[]', true); ?>
                                 <option <?php if (in_array(intval($rBouquet['id']), $folderBouquets)) {
@@ -218,9 +218,9 @@ use XcVm\Domain\Stream\StreamConfigRepository;
                             <?php } ?>
                         </select>
                     </div>
-                    <div class="mb-6" id="override_category">
-                        <label class="form-label" for="override_category">Override Category</label>
-                        <select name="override_category" id="override_category" class="form-select">
+                    <div class="mb-4" id="override_category">
+                        <label class="col-form-label" for="override_category">Override Category</label>
+                        <select name="override_category" id="override_category" class="form-control">
                             <option <?php if (isset($rFolder) && intval($rFolder['category_id']) == 0) {
                                         echo 'selected ';
                                     } ?> value="0">Do Not Use</option>
@@ -238,9 +238,9 @@ use XcVm\Domain\Stream\StreamConfigRepository;
                                 <?php } ?>
                         </select>
                     </div>
-                    <div class="mb-6" id="fallback_category">
-                        <label class="form-label" for="fallback_category">Fallback Category</label>
-                        <select name="fallback_category" id="fallback_category" class="form-select">
+                    <div class="mb-4" id="fallback_category">
+                        <label class="col-form-label" for="fallback_category">Fallback Category</label>
+                        <select name="fallback_category" id="fallback_category" class="form-control">
                             <option <?php if (isset($rFolder) && intval($rFolder['fb_category_id']) == 0) {
                                         echo 'selected ';
                                     } ?> value="0">Do Not Use</option>
@@ -258,9 +258,9 @@ use XcVm\Domain\Stream\StreamConfigRepository;
                                 <?php } ?>
                         </select>
                     </div>
-                    <div class="mb-6">
-                        <label class="form-label" for="transcode_profile_id">Transcoding Profile <i title="Select a transcoding profile to autoamtically encode videos." class="icon-base ti tabler-help-circle text-secondary"></i></label>
-                        <select name="transcode_profile_id" id="transcode_profile_id" class="form-select">
+                    <div class="mb-4">
+                        <label class="col-form-label" for="transcode_profile_id">Transcoding Profile <i title="Select a transcoding profile to autoamtically encode videos." class="mdi mdi-help-circle-outline text-secondary"></i></label>
+                        <select name="transcode_profile_id" id="transcode_profile_id" class="form-control">
                             <option <?php if (isset($rFolder) && intval($rFolder['transcode_profile_id']) == 0) {
                                         echo 'selected ';
                                     } ?>value="0">Transcoding Disabled</option>
@@ -276,7 +276,7 @@ use XcVm\Domain\Stream\StreamConfigRepository;
         </div>
     </div>
 
-    <div class="d-flex justify-content-end mb-6">
+    <div class="d-flex justify-content-end mb-4">
         <input name="submit_folder" type="submit" class="btn btn-primary" value="<?= isset($rFolder) ? 'Edit' : 'Add'; ?>" />
     </div>
 </form>

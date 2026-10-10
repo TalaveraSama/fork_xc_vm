@@ -13,15 +13,15 @@
 		function esc(v) { return $("<div>").text(v == null ? "" : v).html(); }
 		function typeCell(d) { return d == 1 ? "Movies" : (d == 2 ? "Series" : ""); }
 		function serverCell(d, t, row) { return canServers ? '<a href="server_view?id=' + row.server_id + '">' + esc(row.server_name) + '</a>' : esc(row.server_name); }
-		function statusCell(d) { var s = WATCH_STATUS[d]; return s ? '<span class="badge bg-label-' + s[0] + '">' + s[1] + '</span>' : ""; }
+		function statusCell(d) { var s = WATCH_STATUS[d]; return s ? '<span class="badge badge-' + s[0] + '">' + s[1] + '</span>' : ""; }
 		function actionsCell(d, t, row) {
-			var h = '<div class="d-inline-flex gap-1">';
+			var h = '<div class="d-inline-block">';
 			if (row.stream_id > 0) {
-				if (row.type == 1 && canEditMovie) { h += '<a href="stream_view?id=' + row.stream_id + '" title="View Movie" class="btn btn-sm btn-icon btn-label-secondary"><i class="icon-base ti tabler-eye"></i></a>'; }
-				else if (row.type == 2 && canEditEpisode) { h += '<a href="stream_view?id=' + row.stream_id + '" title="View Episode" class="btn btn-sm btn-icon btn-label-secondary"><i class="icon-base ti tabler-eye"></i></a>'; }
+				if (row.type == 1 && canEditMovie) { h += '<a href="stream_view?id=' + row.stream_id + '" title="View Movie" class="btn btn-sm btn-outline-secondary"><i class="mdi mdi-eye"></i></a>'; }
+				else if (row.type == 2 && canEditEpisode) { h += '<a href="stream_view?id=' + row.stream_id + '" title="View Episode" class="btn btn-sm btn-outline-secondary"><i class="mdi mdi-eye"></i></a>'; }
 			}
-			if (row.status > 1 && row.type == 1) { h += '<a href="movie?path=' + encodeURIComponent("s:" + row.server_id + ":" + row.filename) + '" title="Manual Match" class="btn btn-sm btn-icon btn-label-secondary"><i class="icon-base ti tabler-plus"></i></a>'; }
-			h += '<button type="button" title="Delete" class="btn btn-sm btn-icon btn-label-danger" onClick="api(' + row.id + ', \'delete\');"><i class="icon-base ti tabler-x"></i></button>';
+			if (row.status > 1 && row.type == 1) { h += '<a href="movie?path=' + encodeURIComponent("s:" + row.server_id + ":" + row.filename) + '" title="Manual Match" class="btn btn-sm btn-outline-secondary"><i class="mdi mdi-plus"></i></a>'; }
+			h += '<button type="button" title="Delete" class="btn btn-sm btn-outline-danger" onClick="api(' + row.id + ', \'delete\');"><i class="mdi mdi-close"></i></button>';
 			return h + "</div>";
 		}
 
@@ -96,10 +96,7 @@
 					[5, 'desc']
 				],
 				pageLength: <?= intval($rSettings['default_entries']) ?: 10; ?>,
-				layout: {
-					topStart: 'pageLength',
-					topEnd: 'search'
-				}
+				dom: 'lfrtip'
 			});
 
 			$('#result_search').keyup(function() {
@@ -173,6 +170,3 @@
 		});
 	})();
 </script>
-</body>
-
-</html>

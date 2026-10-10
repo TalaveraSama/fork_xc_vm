@@ -73,15 +73,15 @@
                     $("#datatable").DataTable().clear();
                     $("#datatable-files").DataTable().clear();
                     if (window.currentDirectory != "/") {
-                        $("#datatable").DataTable().row.add(["<i class='icon-base ti tabler-arrow-up'></i>", "Parent Directory"]);
+                        $("#datatable").DataTable().row.add(["<i class='mdi mdi-arrow-up'></i>", "Parent Directory"]);
                     }
                     if (data.result == true) {
                         $(data.data.dirs).each(function (id, dir) {
-                            $("#datatable").DataTable().row.add(["<i class='icon-base ti tabler-folder'></i>", dir]);
+                            $("#datatable").DataTable().row.add(["<i class='mdi mdi-folder'></i>", dir]);
                         });
                         $("#datatable").DataTable().draw(true);
                         $(data.data.files).each(function (id, dir) {
-                            $("#datatable-files").DataTable().row.add(["<i class='icon-base ti tabler-file'></i>", dir]);
+                            $("#datatable-files").DataTable().row.add(["<i class='mdi mdi-file'></i>", dir]);
                         });
                         $("#datatable-files").DataTable().draw(true);
                     }
@@ -139,6 +139,3 @@
         });
     })();
 </script>
-</body>
-
-</html>

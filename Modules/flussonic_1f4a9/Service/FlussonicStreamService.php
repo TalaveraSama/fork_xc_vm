@@ -20,6 +20,50 @@ class FlussonicStreamService {
 	use \XcVm\Infrastructure\Database\DatabaseAware;
 
 	/**
+	 * Turn a Flussonic slug into a human-readable channel name.
+	 *
+	 * Flussonic reports the technical stream name (`canal_tv`) as the title for
+	 * most streams, which used to be imported verbatim into the panel and made
+	 * playlists/CSV exports unreadable. Names that already contain a space are
+	 * left untouched; slug-like values get their separators replaced by spaces.
+	 *
+	 * @param string $rValue Raw name or title.
+	 * @return string Display-ready label ('' when the input is empty).
+	 */
+	public static function prettifyName(string $rValue): string {
+		$rValue = trim($rValue);
+
+		if ($rValue === '') {
+			return '';
+		}
+
+		if (strpos($rValue, ' ') === false) {
+			$rValue = preg_replace('/[_\-\.]+/u', ' ', $rValue) ?? $rValue;
+		}
+
+		$rValue = preg_replace('/\s+/u', ' ', $rValue) ?? $rValue;
+
+		return trim($rValue);
+	}
+
+	/**
+	 * Display label for a catalogue/API row: the title when it is usable, the
+	 * stream name otherwise, both passed through prettifyName().
+	 *
+	 * @param array<string,mixed> $rRow Row with `title` and/or `name` keys.
+	 * @return string
+	 */
+	public static function displayLabel(array $rRow): string {
+		$rTitle = self::prettifyName((string) ($rRow['title'] ?? ''));
+
+		if ($rTitle !== '') {
+			return $rTitle;
+		}
+
+		return self::prettifyName((string) ($rRow['name'] ?? ''));
+	}
+
+	/**
 	 * Discovered streams, optionally filtered.
 	 *
 	 * @param array{server_id?:int,status?:string,search?:string} $rFilters Filters.
@@ -102,6 +146,7 @@ class FlussonicStreamService {
 		$db = self::db();
 		$rServerID = (int) $rServerID;
 		$rName = (string) $rStream['name'];
+		$rLabel = self::displayLabel($rStream);
 		$rNow = time();
 
 		$db->query('SELECT `id` FROM `flussonic_streams` WHERE `server_id` = ? AND `name` = ? LIMIT 1;', $rServerID, $rName);
@@ -110,7 +155,7 @@ class FlussonicStreamService {
 		if ($rExistingID > 0) {
 			$db->query(
 				'UPDATE `flussonic_streams` SET `title` = ?, `alive` = ?, `bitrate` = ?, `clients` = ?, `input_url` = ?, `video_codec` = ?, `audio_codec` = ?, `resolution` = ?, `dvr_depth` = ?, `logo` = ?, `play_url` = ?, `last_seen` = ? WHERE `id` = ?;',
-				(string) $rStream['title'],
+				$rLabel,
 				!empty($rStream['alive']) ? 1 : 0,
 				(int) $rStream['bitrate'],
 				(int) $rStream['clients'],
@@ -124,7 +169,6 @@ class FlussonicStreamService {
 				$rNow,
 				$rExistingID
 			);
-
 			return false;
 		}
 

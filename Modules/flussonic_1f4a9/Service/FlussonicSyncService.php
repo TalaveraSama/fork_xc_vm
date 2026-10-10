@@ -262,6 +262,86 @@ class FlussonicSyncService {
 	}
 
 	/**
+	 * Rewrite the display name of channels that were imported before names were
+	 * prettified (slug names such as `canal_tv`, which made playlist and CSV
+	 * exports unreadable).
+	 *
+	 * Both the panel channel (`streams`.`stream_display_name`) and the catalogue
+	 * label (`flussonic_streams`.`title`) are rebuilt from the current server
+	 * settings, so the server prefix is preserved.
+	 *
+	 * @param array<string,mixed>|int $rServer Server row or id.
+	 * @return int Number of panel channels renamed.
+	 */
+	public static function repairImportedNames($rServer): int {
+		if (!is_array($rServer)) {
+			$rServer = FlussonicServerService::getById($rServer);
+		}
+
+		if (!is_array($rServer)) {
+			return 0;
+		}
+
+		$db = self::db();
+		$rPrefix = trim((string) ($rServer['stream_prefix'] ?? ''));
+		$rRows = FlussonicStreamService::getAll(['server_id' => (int) $rServer['id'], 'status' => 'imported']);
+		$rStreamIDs = [];
+
+		foreach ($rRows as $rRow) {
+			if ((int) $rRow['stream_id'] > 0) {
+				$rStreamIDs[] = (int) $rRow['stream_id'];
+			}
+		}
+
+		if ($rStreamIDs === []) {
+			return 0;
+		}
+
+		$rCurrent = [];
+
+		$db->query('SELECT `id`, `stream_display_name` FROM `streams` WHERE `id` IN (' . implode(',', $rStreamIDs) . ');');
+
+		foreach ($db->get_rows() as $rStream) {
+			$rCurrent[(int) $rStream['id']] = (string) $rStream['stream_display_name'];
+		}
+
+		$rRenamed = [];
+
+		foreach ($rRows as $rRow) {
+			$rStreamID = (int) $rRow['stream_id'];
+
+			if ($rStreamID <= 0 || !isset($rCurrent[$rStreamID])) {
+				continue;
+			}
+
+			$rLabel = FlussonicStreamService::displayLabel($rRow);
+
+			if ($rLabel === '') {
+				continue;
+			}
+
+			$db->query('UPDATE `flussonic_streams` SET `title` = ? WHERE `id` = ?;', $rLabel, (int) $rRow['id']);
+
+			$rDisplayName = mb_substr($rPrefix !== '' ? $rPrefix . ' ' . $rLabel : $rLabel, 0, 250);
+
+			if ($rDisplayName === $rCurrent[$rStreamID]) {
+				continue;
+			}
+
+			$db->query('UPDATE `streams` SET `stream_display_name` = ? WHERE `id` = ?;', $rDisplayName, $rStreamID);
+			$rRenamed[] = $rStreamID;
+		}
+
+		if ($rRenamed !== []) {
+			// `streams` rows are cached in Redis/JSON by the panel, and the
+			// playlist/servers pick the new label up from that cache.
+			StreamProcess::updateStreams($rRenamed);
+		}
+
+		return count($rRenamed);
+	}
+
+	/**
 	 * Start the panel channels this module just created or repointed.
 	 *
 	 * The import used to end at StreamProcess::updateStreams(), which only
@@ -334,7 +414,7 @@ class FlussonicSyncService {
 	private static function createPanelStream(array $rServer, array $rRow, string $rSource, array $rCategories, int $rOrder): int {
 		$db = self::db();
 		$rPrefix = trim((string) ($rServer['stream_prefix'] ?? ''));
-		$rTitle = trim((string) $rRow['title']) !== '' ? (string) $rRow['title'] : (string) $rRow['name'];
+		$rTitle = FlussonicStreamService::displayLabel($rRow);
 		$rDisplayName = $rPrefix !== '' ? $rPrefix . ' ' . $rTitle : $rTitle;
 
 		$rOk = $db->query(

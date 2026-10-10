@@ -93,14 +93,12 @@
 					visible: false,
 					targets: [0]
 				}],
-				layout: {
-					topStart: 'pageLength',
-					topEnd: 'search'
+				dom: 'lfrtip',
+				language: {
+					emptyTable: 'No folders yet. Click "Add Folder" to choose the directory to scan.',
+					zeroRecords: 'No folders match your search.'
 				}
 			});
 		});
 	})();
 </script>
-</body>
-
-</html>

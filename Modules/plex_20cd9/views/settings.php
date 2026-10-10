@@ -18,7 +18,7 @@ use XcVm\Domain\Stream\CategoryService;
 <?php if (isset($_STATUS) && $_STATUS == STATUS_SUCCESS): ?>
     <div class="alert alert-success alert-dismissible fade show" role="alert">
         Plex settings successfully updated!
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        <button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>
     </div>
 <?php endif; ?>
 
@@ -26,31 +26,31 @@ use XcVm\Domain\Stream\CategoryService;
     <div class="card-body">
         <form id="plex-settings-form" method="POST" action="post.php?action=settings_plex" autocomplete="off">
             <ul class="nav nav-tabs" role="tablist">
-                <li class="nav-item"><button type="button" class="nav-link active" data-bs-toggle="tab" data-bs-target="#setup"><i class="icon-base ti tabler-id me-1"></i>Setup</button></li>
-                <li class="nav-item"><button type="button" class="nav-link" data-bs-toggle="tab" data-bs-target="#categories"><i class="icon-base ti tabler-movie me-1"></i>Movie Categories</button></li>
-                <li class="nav-item"><button type="button" class="nav-link" data-bs-toggle="tab" data-bs-target="#categories-tv"><i class="icon-base ti tabler-device-tv me-1"></i>TV Categories</button></li>
+                <li class="nav-item"><button type="button" class="nav-link active" data-toggle="tab" data-target="#setup"><i class="mdi mdi-identifier mr-1"></i>Setup</button></li>
+                <li class="nav-item"><button type="button" class="nav-link" data-toggle="tab" data-target="#categories"><i class="mdi mdi-movie mr-1"></i>Movie Categories</button></li>
+                <li class="nav-item"><button type="button" class="nav-link" data-toggle="tab" data-target="#categories-tv"><i class="mdi mdi-television mr-1"></i>TV Categories</button></li>
             </ul>
 
             <div class="tab-content p-4 border border-top-0 rounded-bottom">
                 <!-- Setup -->
                 <div class="tab-pane fade show active" id="setup">
-                    <div class="row mb-6">
+                    <div class="row mb-4">
                         <div class="col-md-6">
-                            <label class="form-label" for="thread_count_movie">Movie Thread Count <i title="Number of threads to run simultaneously for movies." class="icon-base ti tabler-help-circle text-secondary"></i></label>
+                            <label class="col-form-label" for="thread_count_movie">Movie Thread Count <i title="Number of threads to run simultaneously for movies." class="mdi mdi-help-circle-outline text-secondary"></i></label>
                             <input type="text" class="form-control text-center" id="thread_count_movie" name="thread_count_movie" value="<?= htmlspecialchars($rSettings['thread_count_movie']); ?>">
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label" for="thread_count_show">Series Thread Count <i title="Number of threads to run simultaneously for TV series. This should be lower as the series thread will be responsible for grabbing all episodes. So this is the number of TV series to scan at once rather than episodes. Try 1/10th of movie thread limit." class="icon-base ti tabler-help-circle text-secondary"></i></label>
+                            <label class="col-form-label" for="thread_count_show">Series Thread Count <i title="Number of threads to run simultaneously for TV series. This should be lower as the series thread will be responsible for grabbing all episodes. So this is the number of TV series to scan at once rather than episodes. Try 1/10th of movie thread limit." class="mdi mdi-help-circle-outline text-secondary"></i></label>
                             <input type="text" class="form-control text-center" id="thread_count_show" name="thread_count_show" value="<?= htmlspecialchars($rSettings['thread_count_show']); ?>">
                         </div>
                     </div>
                     <div class="row">
                         <div class="col-md-6">
-                            <label class="form-label" for="scan_seconds">Scan Frequency <i title="Scan a library every X seconds." class="icon-base ti tabler-help-circle text-secondary"></i></label>
+                            <label class="col-form-label" for="scan_seconds">Scan Frequency <i title="Scan a library every X seconds." class="mdi mdi-help-circle-outline text-secondary"></i></label>
                             <input type="text" class="form-control text-center" id="scan_seconds" name="scan_seconds" value="<?= htmlspecialchars($rSettings['scan_seconds']); ?>">
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label" for="max_genres">Max Categories &amp; Bouquets <i title="Maximum number of TMDb genres to convert into categories and bouquets. Enter 0 for unlimited." class="icon-base ti tabler-help-circle text-secondary"></i></label>
+                            <label class="col-form-label" for="max_genres">Max Categories &amp; Bouquets <i title="Maximum number of TMDb genres to convert into categories and bouquets. Enter 0 for unlimited." class="mdi mdi-help-circle-outline text-secondary"></i></label>
                             <input type="text" class="form-control text-center" id="max_genres" name="max_genres" value="<?= htmlspecialchars($rSettings['max_genres']); ?>">
                         </div>
                     </div>
@@ -67,7 +67,7 @@ use XcVm\Domain\Stream\CategoryService;
                             <div class="row mb-4">
                                 <label class="col-md-2 col-form-label" for="genre_<?= $rRow['genre_id']; ?>"><?= $rRow['genre']; ?></label>
                                 <div class="col-md-4">
-                                    <select name="genre_<?= $rRow['genre_id']; ?>" id="genre_<?= $rRow['genre_id']; ?>" class="form-select select2">
+                                    <select name="genre_<?= $rRow['genre_id']; ?>" id="genre_<?= $rRow['genre_id']; ?>" class="form-control select2">
                                         <option value="0" <?= intval($rRow['category_id']) == 0 ? 'selected' : ''; ?>>Do Not Use</option>
                                         <?php foreach (CategoryService::getAllByType('movie') as $rCategory): ?>
                                             <option value="<?= $rCategory['id']; ?>" <?= intval($rRow['category_id']) == intval($rCategory['id']) ? 'selected' : ''; ?>><?= $rCategory['category_name']; ?></option>
@@ -76,7 +76,7 @@ use XcVm\Domain\Stream\CategoryService;
                                 </div>
                                 <label class="col-md-2 col-form-label" for="bouquet_<?= $rRow['genre_id']; ?>">Bouquets</label>
                                 <div class="col-md-4">
-                                    <select name="bouquet_<?= $rRow['genre_id']; ?>[]" id="bouquet_<?= $rRow['genre_id']; ?>" class="form-select select2" multiple="multiple" data-placeholder="Choose...">
+                                    <select name="bouquet_<?= $rRow['genre_id']; ?>[]" id="bouquet_<?= $rRow['genre_id']; ?>" class="form-control select2" multiple="multiple" data-placeholder="Choose...">
                                         <?php foreach ((is_array($rBouquets ?? null) ? $rBouquets : []) as $rBouquet): ?>
                                             <option value="<?= $rBouquet['id']; ?>" <?= in_array(intval($rBouquet['id']), (array) json_decode($rRow['bouquets'], true)) ? 'selected' : ''; ?>><?= $rBouquet['bouquet_name']; ?></option>
                                         <?php endforeach; ?>
@@ -100,7 +100,7 @@ use XcVm\Domain\Stream\CategoryService;
                             <div class="row mb-4">
                                 <label class="col-md-2 col-form-label" for="genretv_<?= $rRow['genre_id']; ?>"><?= $rRow['genre']; ?></label>
                                 <div class="col-md-4">
-                                    <select name="genretv_<?= $rRow['genre_id']; ?>" id="genretv_<?= $rRow['genre_id']; ?>" class="form-select select2">
+                                    <select name="genretv_<?= $rRow['genre_id']; ?>" id="genretv_<?= $rRow['genre_id']; ?>" class="form-control select2">
                                         <option value="0" <?= intval($rRow['category_id']) == 0 ? 'selected' : ''; ?>>Do Not Use</option>
                                         <?php foreach (CategoryService::getAllByType('series') as $rCategory): ?>
                                             <option value="<?= $rCategory['id']; ?>" <?= intval($rRow['category_id']) == intval($rCategory['id']) ? 'selected' : ''; ?>><?= $rCategory['category_name']; ?></option>
@@ -109,7 +109,7 @@ use XcVm\Domain\Stream\CategoryService;
                                 </div>
                                 <label class="col-md-2 col-form-label" for="bouquettv_<?= $rRow['genre_id']; ?>">Bouquets</label>
                                 <div class="col-md-4">
-                                    <select name="bouquettv_<?= $rRow['genre_id']; ?>[]" id="bouquettv_<?= $rRow['genre_id']; ?>" class="form-select select2" multiple="multiple" data-placeholder="Choose...">
+                                    <select name="bouquettv_<?= $rRow['genre_id']; ?>[]" id="bouquettv_<?= $rRow['genre_id']; ?>" class="form-control select2" multiple="multiple" data-placeholder="Choose...">
                                         <?php foreach ((is_array($rBouquets ?? null) ? $rBouquets : []) as $rBouquet): ?>
                                             <option value="<?= $rBouquet['id']; ?>" <?= in_array(intval($rBouquet['id']), (array) json_decode($rRow['bouquets'], true)) ? 'selected' : ''; ?>><?= $rBouquet['bouquet_name']; ?></option>
                                         <?php endforeach; ?>

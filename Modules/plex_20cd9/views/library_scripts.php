@@ -93,14 +93,8 @@
 					visible: false,
 					targets: [0]
 				}],
-				layout: {
-					topStart: 'pageLength',
-					topEnd: 'search'
-				}
+				dom: 'lfrtip'
 			});
 		});
 	})();
 </script>
-</body>
-
-</html>

@@ -157,6 +157,7 @@ if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQ
 											<td class="text-center text-nowrap">
 												<a href="flussonic_streams?server=<?php echo $rID; ?>" class="btn btn-sm btn-outline-info" data-toggle="tooltip" title="Browse streams"><i class="mdi mdi-playlist-play"></i></a>
 												<button type="button" class="btn btn-sm btn-outline-primary" onClick="flussonicSync(<?php echo $rID; ?>);" data-toggle="tooltip" title="Sync now"><i class="mdi mdi-sync"></i></button>
+												<button type="button" class="btn btn-sm btn-outline-info" onClick="flussonicFixNames(<?php echo $rID; ?>);" data-toggle="tooltip" title="Fix imported channel names (canal_tv -> canal tv)"><i class="mdi mdi-rename-box"></i></button>
 												<a href="flussonic_server?id=<?php echo $rID; ?>" class="btn btn-sm btn-outline-secondary" data-toggle="tooltip" title="Edit"><i class="mdi mdi-pencil"></i></a>
 												<?php if ($rRow['enabled']): ?>
 													<button type="button" class="btn btn-sm btn-outline-warning" onClick="flussonicServer(<?php echo $rID; ?>, 'disable');" data-toggle="tooltip" title="Disable"><i class="mdi mdi-pause"></i></button>
@@ -198,6 +199,24 @@ renderUnifiedLayoutFooter('admin');
 			// Without this a failed request is completely silent: no
 			// toast, no console entry, nothing. A 502 or an expired
 			// session then looks exactly like a button that does nothing.
+			$.toast("Request failed (" + rXHR.status + "). Check the panel log.");
+		});
+	}
+
+	function flussonicFixNames(rID) {
+		$.toast("Renaming imported channels...");
+		$.getJSON("./api?action=flussonic_server&sub=fix_names&id=" + rID, function(data) {
+			if (data.result === true) {
+				$.toast(data.renamed + " channel(s) renamed.");
+				if (data.renamed > 0) {
+					setTimeout(function() {
+						location.reload();
+					}, 1200);
+				}
+			} else {
+				$.toast(data.error || "An error occured while processing your request.");
+			}
+		}).fail(function (rXHR) {
 			$.toast("Request failed (" + rXHR.status + "). Check the panel log.");
 		});
 	}

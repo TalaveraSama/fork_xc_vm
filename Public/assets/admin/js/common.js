@@ -441,19 +441,55 @@
 		$(".bs-whois-modal-center").modal("show");
 	};
 
+	/* Floating fallback for the live counters: the header bar is only rendered
+	   when the "header_stats" setting is on and the viewport is not mobile, so
+	   every other page/viewport gets this pill instead. */
+	window.headerStatsWidget = function (rData) {
+		var rBox = document.getElementById("live_header_stats");
+		if (!rBox) {
+			if (document.getElementById("header_stats")) {
+				return;
+			}
+			rBox = document.createElement("div");
+			rBox.id = "live_header_stats";
+			rBox.setAttribute("style", "position:fixed;top:62px;right:12px;z-index:1035;background:rgba(17,17,17,.78);color:#fff;border-radius:18px;padding:3px 12px;font-size:12px;line-height:22px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.28)");
+			rBox.innerHTML = '<span class="tooltip" title="Connected clients"><i class="fe-zap"></i> <b id="live_header_connections">0</b></span>' + ' &nbsp; ' + '<span class="tooltip" title="Online users"><i class="fe-users"></i> <b id="live_header_users">0</b></span>' + ' &nbsp; ' + '<span class="tooltip" title="Running streams"><i class="fe-play"></i> <b id="live_header_streams">0</b></span>';
+			document.body.appendChild(rBox);
+		}
+		$("#live_header_connections").html($.number ? $.number(rData.total_connections, 0) : rData.total_connections);
+		$("#live_header_users").html($.number ? $.number(rData.total_users, 0) : rData.total_users);
+		$("#live_header_streams").html($.number ? $.number(rData.total_running_streams, 0) : rData.total_running_streams);
+	};
+
 	window.headerStats = function () {
-		var rURL = "./api?action=header_stats";
-		$.getJSON(rURL, function (data) {
-			$("#header_connections").html($.number(data.total_connections, 0));
-			$("#header_users").html($.number(data.total_users, 0));
-			$("#header_network_up").html($.number(Math.floor(data.bytes_sent / 125000), 0));
-			$("#header_network_down").html($.number(Math.floor(data.bytes_received / 125000), 0));
-			$("#header_streams_up").html($.number(data.total_running_streams, 0));
-			$("#header_streams_down").html($.number(data.offline_streams, 0));
-			setTimeout(headerStats, 1000);
-		}).fail(function () {
-			setTimeout(headerStats, 1000);
-		});
+		window.XC_VM = window.XC_VM || {};
+		if (window.XC_VM.headerStatsActive) {
+			return;
+		}
+		window.XC_VM.headerStatsActive = true;
+		var rInterval = parseInt(window.XC_VM.Config && window.XC_VM.Config.headerStatsInterval, 10);
+		if (!(rInterval >= 1000)) {
+			rInterval = 5000;
+		}
+		var refreshStats = function () {
+			$.getJSON("./api?action=header_stats", function (data) {
+				if (data.result === false) {
+					window.XC_VM.headerStatsActive = false;
+					return;
+				}
+				$("#header_connections").html($.number(data.total_connections, 0));
+				$("#header_users").html($.number(data.total_users, 0));
+				$("#header_network_up").html($.number(Math.floor(data.bytes_sent / 125000), 0));
+				$("#header_network_down").html($.number(Math.floor(data.bytes_received / 125000), 0));
+				$("#header_streams_up").html($.number(data.total_running_streams, 0));
+				$("#header_streams_down").html($.number(data.offline_streams, 0));
+				headerStatsWidget(data);
+				setTimeout(refreshStats, rInterval);
+			}).fail(function () {
+				setTimeout(refreshStats, rInterval);
+			});
+		};
+		refreshStats();
 	};
 
 	window.addCredits = function (rID) {
